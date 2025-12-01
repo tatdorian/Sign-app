@@ -60,15 +60,65 @@ main {
     font-size: 1.5em;
 }
 
+/* Zone de drag & drop pour upload */
 .upload-area {
     text-align: center;
-    padding: 20px;
+    padding: 40px;
+    border: 3px dashed #667eea;
+    border-radius: 15px;
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+.upload-area:hover {
+    border-color: #764ba2;
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+    transform: scale(1.01);
+}
+
+.upload-area.dragover {
+    border-color: #28a745;
+    background: linear-gradient(135deg, rgba(40, 167, 69, 0.15) 0%, rgba(40, 167, 69, 0.1) 100%);
+    transform: scale(1.02);
+}
+
+.drop-zone-content {
+    pointer-events: none;
+}
+
+.drop-icon {
+    font-size: 4em;
+    margin-bottom: 15px;
+    animation: float 3s ease-in-out infinite;
+}
+
+@keyframes float {
+    0%, 100% {
+        transform: translateY(0px);
+    }
+    50% {
+        transform: translateY(-10px);
+    }
+}
+
+.drop-text {
+    font-size: 1.2em;
+    font-weight: 600;
+    color: #667eea;
+    margin: 10px 0;
+}
+
+.drop-text-or {
+    color: #999;
+    margin: 15px 0;
+    font-size: 0.9em;
 }
 
 .file-info {
     margin-top: 15px;
     color: #666;
-    font-style: italic;
+    font-size: 0.9em;
 }
 
 .btn {

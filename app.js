@@ -37,6 +37,70 @@ ctx.lineCap = 'round';
 // Gestion de l'upload de fichier
 fileInput.addEventListener('change', handleFileUpload);
 
+// ============================================
+// DRAG & DROP - Upload de documents
+// ============================================
+
+const dropZone = document.getElementById('drop-zone');
+
+// Empêcher le comportement par défaut pour tous les événements de drag
+['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+    dropZone.addEventListener(eventName, preventDefaults, false);
+    document.body.addEventListener(eventName, preventDefaults, false);
+});
+
+function preventDefaults(e) {
+    e.preventDefault();
+    e.stopPropagation();
+}
+
+// Highlight de la zone de drop quand on survole
+['dragenter', 'dragover'].forEach(eventName => {
+    dropZone.addEventListener(eventName, highlight, false);
+});
+
+['dragleave', 'drop'].forEach(eventName => {
+    dropZone.addEventListener(eventName, unhighlight, false);
+});
+
+function highlight() {
+    dropZone.classList.add('dragover');
+}
+
+function unhighlight() {
+    dropZone.classList.remove('dragover');
+}
+
+// Gérer le drop du fichier
+dropZone.addEventListener('drop', handleDrop, false);
+
+function handleDrop(e) {
+    const dt = e.dataTransfer;
+    const files = dt.files;
+
+    if (files.length > 0) {
+        const file = files[0];
+
+        // Vérifier le type de fichier
+        if (file.type === 'application/pdf' || file.type.startsWith('image/')) {
+            // Créer un événement simulé pour handleFileUpload
+            const event = {
+                target: {
+                    files: [file]
+                }
+            };
+            handleFileUpload(event);
+        } else {
+            alert('Veuillez déposer un fichier PDF ou une image (JPG, PNG)');
+        }
+    }
+}
+
+// Cliquer sur la zone de drop ouvre aussi le sélecteur de fichiers
+dropZone.addEventListener('click', () => {
+    fileInput.click();
+});
+
 async function handleFileUpload(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -47,13 +111,23 @@ async function handleFileUpload(e) {
     // Réinitialiser la prévisualisation de la signature
     state.previewVisible = false;
     const signatureOverlay = document.getElementById('signature-overlay');
+    const toggleBtn = document.getElementById('toggle-preview-btn');
+
     if (signatureOverlay) {
         signatureOverlay.style.display = 'none';
     }
 
-    // Sauvegarder l'overlay avant de vider le preview
-    const overlayHTML = signatureOverlay ? signatureOverlay.outerHTML : '';
-    documentPreview.innerHTML = '';
+    if (toggleBtn) {
+        toggleBtn.textContent = '👁️ Afficher la signature sur le document';
+    }
+
+    // Vider seulement le contenu du document (garder l'overlay)
+    const children = Array.from(documentPreview.children);
+    children.forEach(child => {
+        if (child.id !== 'signature-overlay') {
+            child.remove();
+        }
+    });
 
     if (file.type === 'application/pdf') {
         state.uploadedFileType = 'pdf';
@@ -61,11 +135,6 @@ async function handleFileUpload(e) {
     } else if (file.type.startsWith('image/')) {
         state.uploadedFileType = 'image';
         loadImage(file);
-    }
-
-    // Remettre l'overlay après avoir chargé le document
-    if (overlayHTML) {
-        documentPreview.insertAdjacentHTML('beforeend', overlayHTML);
     }
 
     // Afficher les sections suivantes
@@ -183,10 +252,13 @@ function draw(e) {
     lastY = y;
 }
 
-function stopDrawing() {
+async function stopDrawing() {
     if (state.isDrawing) {
         state.isDrawing = false;
         state.signatureData = signatureCanvas.toDataURL();
+
+        // Sauvegarder automatiquement dans Supabase
+        await saveSignatureToDatabase();
 
         // Mettre à jour la prévisualisation si visible
         updateSignaturePreview();
@@ -213,6 +285,90 @@ clearBtn.addEventListener('click', () => {
     if (signatureOverlay) {
         signatureOverlay.style.display = 'none';
     }
+});
+
+// ============================================
+// SUPABASE - Sauvegarde des signatures
+// ============================================
+
+// Sauvegarder la signature dans Supabase
+async function saveSignatureToDatabase() {
+    if (!state.signatureData) return;
+
+    try {
+        // Vérifier que Supabase est initialisé
+        if (typeof saveSignatureTemplate !== 'function') {
+            console.log('Supabase non configuré, signature sauvegardée localement uniquement');
+            return;
+        }
+
+        // Sauvegarder dans Supabase
+        const result = await saveSignatureTemplate(
+            `Signature ${new Date().toLocaleDateString()}`,
+            state.signatureData
+        );
+
+        if (result.success) {
+            console.log('✅ Signature sauvegardée dans Supabase:', result.data?.id);
+            // Sauvegarder aussi dans localStorage comme backup
+            localStorage.setItem('lastSignature', state.signatureData);
+            localStorage.setItem('lastSignatureId', result.data?.id || '');
+        } else {
+            console.warn('⚠️ Erreur Supabase, sauvegarde locale:', result.error);
+            localStorage.setItem('lastSignature', state.signatureData);
+        }
+    } catch (error) {
+        console.warn('⚠️ Erreur sauvegarde signature:', error);
+        // Fallback: sauvegarder dans localStorage
+        localStorage.setItem('lastSignature', state.signatureData);
+    }
+}
+
+// Charger la dernière signature au démarrage
+async function loadLastSignature() {
+    try {
+        // D'abord essayer de charger depuis Supabase
+        if (typeof getSignatureTemplates === 'function') {
+            const result = await getSignatureTemplates();
+
+            if (result.success && result.data && result.data.length > 0) {
+                // Prendre la signature la plus récente
+                const latestSignature = result.data[0];
+                state.signatureData = latestSignature.signature_data;
+
+                // Dessiner la signature sur le canvas
+                const img = new Image();
+                img.onload = () => {
+                    ctx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
+                    ctx.drawImage(img, 0, 0, signatureCanvas.width, signatureCanvas.height);
+                    console.log('✅ Signature chargée depuis Supabase');
+                };
+                img.src = state.signatureData;
+                return;
+            }
+        }
+
+        // Fallback: charger depuis localStorage
+        const localSignature = localStorage.getItem('lastSignature');
+        if (localSignature) {
+            state.signatureData = localSignature;
+
+            const img = new Image();
+            img.onload = () => {
+                ctx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
+                ctx.drawImage(img, 0, 0, signatureCanvas.width, signatureCanvas.height);
+                console.log('✅ Signature chargée depuis localStorage');
+            };
+            img.src = state.signatureData;
+        }
+    } catch (error) {
+        console.warn('⚠️ Erreur chargement signature:', error);
+    }
+}
+
+// Charger la signature au démarrage de l'application
+window.addEventListener('DOMContentLoaded', () => {
+    loadLastSignature();
 });
 
 // ============================================
