@@ -291,87 +291,265 @@ clearBtn.addEventListener('click', () => {
 });
 
 // ============================================
-// SUPABASE - Sauvegarde des signatures
+// GESTION DES SIGNATURES MULTIPLES
 // ============================================
 
-// Sauvegarder la signature dans Supabase
-async function saveSignatureToDatabase() {
-    if (!state.signatureData) return;
+let savedSignatures = [];
+let selectedSignatureId = null;
 
-    try {
-        // Vérifier que Supabase est initialisé
-        if (typeof saveSignatureTemplate !== 'function') {
-            console.log('Supabase non configuré, signature sauvegardée localement uniquement');
+// Éléments DOM pour la gestion des signatures
+const saveSignatureBtn = document.getElementById('save-signature-btn');
+const signatureNameInput = document.getElementById('signature-name');
+const savedSignaturesList = document.getElementById('saved-signatures-list');
+
+// Bouton de sauvegarde
+if (saveSignatureBtn) {
+    saveSignatureBtn.addEventListener('click', async () => {
+        const signatureName = signatureNameInput.value.trim();
+
+        if (!state.signatureData) {
+            alert('Veuillez dessiner une signature d\'abord !');
             return;
         }
 
-        // Sauvegarder dans Supabase
-        const result = await saveSignatureTemplate(
-            `Signature ${new Date().toLocaleDateString()}`,
-            state.signatureData
-        );
-
-        if (result.success) {
-            console.log('✅ Signature sauvegardée dans Supabase:', result.data?.id);
-            // Sauvegarder aussi dans localStorage comme backup
-            localStorage.setItem('lastSignature', state.signatureData);
-            localStorage.setItem('lastSignatureId', result.data?.id || '');
-        } else {
-            console.warn('⚠️ Erreur Supabase, sauvegarde locale:', result.error);
-            localStorage.setItem('lastSignature', state.signatureData);
+        if (!signatureName) {
+            alert('Veuillez entrer un nom pour la signature');
+            signatureNameInput.focus();
+            return;
         }
+
+        await saveNewSignature(signatureName);
+    });
+}
+
+// Sauvegarder une nouvelle signature
+async function saveNewSignature(name) {
+    try {
+        setButtonState('save-signature-btn', true, '⏳ Sauvegarde...');
+
+        // Créer l'objet signature
+        const signature = {
+            id: `sig_${Date.now()}`,
+            name: name,
+            data: state.signatureData,
+            created_at: new Date().toISOString(),
+            width: parseInt(document.getElementById('signature-scale')?.value || 150),
+            color: document.getElementById('signature-color')?.value || '#000000'
+        };
+
+        // Sauvegarder dans Supabase
+        if (typeof saveSignatureTemplate === 'function') {
+            const result = await saveSignatureTemplate(name, state.signatureData);
+
+            if (result.success && result.data) {
+                signature.id = result.data.id;
+                signature.supabase_id = result.data.id;
+                console.log('✅ Signature sauvegardée dans Supabase:', signature.id);
+            } else {
+                console.warn('⚠️ Supabase non disponible, sauvegarde locale uniquement');
+            }
+        }
+
+        // Sauvegarder dans localStorage comme backup
+        savedSignatures.push(signature);
+        localStorage.setItem('savedSignatures', JSON.stringify(savedSignatures));
+
+        // Sélectionner automatiquement la nouvelle signature
+        selectedSignatureId = signature.id;
+        localStorage.setItem('selectedSignatureId', selectedSignatureId);
+
+        // Rafraîchir l'affichage
+        displaySavedSignatures();
+
+        // Réinitialiser le formulaire
+        signatureNameInput.value = '';
+
+        // Message de succès
+        alert(`✅ Signature "${name}" sauvegardée avec succès !`);
+
+        setButtonState('save-signature-btn', false, '✅ Sauvegarder');
+
     } catch (error) {
-        console.warn('⚠️ Erreur sauvegarde signature:', error);
-        // Fallback: sauvegarder dans localStorage
-        localStorage.setItem('lastSignature', state.signatureData);
+        console.error('❌ Erreur sauvegarde signature:', error);
+        alert('Erreur lors de la sauvegarde de la signature');
+        setButtonState('save-signature-btn', false, '✅ Sauvegarder');
     }
 }
 
-// Charger la dernière signature au démarrage
-async function loadLastSignature() {
+// Afficher toutes les signatures sauvegardées
+function displaySavedSignatures() {
+    if (!savedSignaturesList) return;
+
+    if (savedSignatures.length === 0) {
+        savedSignaturesList.innerHTML = '<p class="no-signatures">Aucune signature sauvegardée</p>';
+        return;
+    }
+
+    savedSignaturesList.innerHTML = '';
+
+    savedSignatures.forEach(signature => {
+        const card = document.createElement('div');
+        card.className = `signature-card ${signature.id === selectedSignatureId ? 'selected' : ''}`;
+        card.onclick = () => selectSignature(signature.id);
+
+        card.innerHTML = `
+            <div class="signature-card-header">
+                <span class="signature-card-name">${signature.name}</span>
+                <div class="signature-card-actions">
+                    <button class="signature-card-btn delete" onclick="event.stopPropagation(); deleteSignature('${signature.id}')">
+                        🗑️
+                    </button>
+                </div>
+            </div>
+            <div class="signature-card-preview">
+                <img src="${signature.data}" alt="${signature.name}">
+            </div>
+            <div class="signature-card-date">
+                ${new Date(signature.created_at).toLocaleDateString('fr-FR', {
+                    day: 'numeric',
+                    month: 'long',
+                    year: 'numeric'
+                })}
+            </div>
+            ${signature.id === selectedSignatureId ? '<span class="signature-card-selected-badge">✓ Sélectionnée</span>' : ''}
+        `;
+
+        savedSignaturesList.appendChild(card);
+    });
+}
+
+// Sélectionner une signature
+function selectSignature(signatureId) {
+    const signature = savedSignatures.find(s => s.id === signatureId);
+    if (!signature) return;
+
+    selectedSignatureId = signatureId;
+    localStorage.setItem('selectedSignatureId', selectedSignatureId);
+
+    // Charger la signature sur le canvas
+    state.signatureData = signature.data;
+
+    const img = new Image();
+    img.onload = () => {
+        ctx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
+        ctx.drawImage(img, 0, 0, signatureCanvas.width, signatureCanvas.height);
+        console.log('✅ Signature sélectionnée:', signature.name);
+    };
+    img.src = signature.data;
+
+    // Mettre à jour l'affichage
+    displaySavedSignatures();
+
+    // Mettre à jour la prévisualisation si visible
+    if (state.previewVisible) {
+        updateSignaturePreview();
+    }
+}
+
+// Supprimer une signature
+async function deleteSignature(signatureId) {
+    if (!confirm('Êtes-vous sûr de vouloir supprimer cette signature ?')) {
+        return;
+    }
+
     try {
-        // D'abord essayer de charger depuis Supabase
+        const signature = savedSignatures.find(s => s.id === signatureId);
+
+        // Supprimer de Supabase si elle a un ID Supabase
+        if (signature && signature.supabase_id && typeof supabaseClient !== 'undefined') {
+            // TODO: Ajouter une fonction de suppression dans supabase-client.js
+            console.log('🗑️ Suppression Supabase:', signature.supabase_id);
+        }
+
+        // Supprimer du tableau local
+        savedSignatures = savedSignatures.filter(s => s.id !== signatureId);
+        localStorage.setItem('savedSignatures', JSON.stringify(savedSignatures));
+
+        // Si c'était la signature sélectionnée, la déselectionner
+        if (selectedSignatureId === signatureId) {
+            selectedSignatureId = null;
+            localStorage.removeItem('selectedSignatureId');
+            // Effacer le canvas
+            ctx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
+            state.signatureData = null;
+        }
+
+        // Rafraîchir l'affichage
+        displaySavedSignatures();
+
+        console.log('✅ Signature supprimée');
+
+    } catch (error) {
+        console.error('❌ Erreur suppression signature:', error);
+        alert('Erreur lors de la suppression de la signature');
+    }
+}
+
+// Charger les signatures au démarrage
+async function loadSavedSignatures() {
+    try {
+        // Charger depuis localStorage
+        const localSignatures = localStorage.getItem('savedSignatures');
+        if (localSignatures) {
+            savedSignatures = JSON.parse(localSignatures);
+            console.log(`📋 ${savedSignatures.length} signature(s) chargée(s) depuis localStorage`);
+        }
+
+        // Charger depuis Supabase
         if (typeof getSignatureTemplates === 'function') {
             const result = await getSignatureTemplates();
 
             if (result.success && result.data && result.data.length > 0) {
-                // Prendre la signature la plus récente
-                const latestSignature = result.data[0];
-                state.signatureData = latestSignature.signature_data;
+                console.log(`📋 ${result.data.length} signature(s) trouvée(s) dans Supabase`);
 
-                // Dessiner la signature sur le canvas
-                const img = new Image();
-                img.onload = () => {
-                    ctx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
-                    ctx.drawImage(img, 0, 0, signatureCanvas.width, signatureCanvas.height);
-                    console.log('✅ Signature chargée depuis Supabase');
-                };
-                img.src = state.signatureData;
-                return;
+                // Fusionner avec les signatures locales
+                result.data.forEach(supabaseSignature => {
+                    // Vérifier si elle n'existe pas déjà
+                    const exists = savedSignatures.find(s => s.supabase_id === supabaseSignature.id);
+                    if (!exists) {
+                        savedSignatures.push({
+                            id: supabaseSignature.id,
+                            supabase_id: supabaseSignature.id,
+                            name: supabaseSignature.name,
+                            data: supabaseSignature.signature_data,
+                            created_at: supabaseSignature.created_at,
+                            width: supabaseSignature.default_width,
+                            color: supabaseSignature.default_color
+                        });
+                    }
+                });
+
+                // Sauvegarder dans localStorage
+                localStorage.setItem('savedSignatures', JSON.stringify(savedSignatures));
             }
         }
 
-        // Fallback: charger depuis localStorage
-        const localSignature = localStorage.getItem('lastSignature');
-        if (localSignature) {
-            state.signatureData = localSignature;
-
-            const img = new Image();
-            img.onload = () => {
-                ctx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
-                ctx.drawImage(img, 0, 0, signatureCanvas.width, signatureCanvas.height);
-                console.log('✅ Signature chargée depuis localStorage');
-            };
-            img.src = state.signatureData;
+        // Charger la signature sélectionnée
+        const savedSelectedId = localStorage.getItem('selectedSignatureId');
+        if (savedSelectedId) {
+            selectSignature(savedSelectedId);
         }
+
+        // Afficher les signatures
+        displaySavedSignatures();
+
     } catch (error) {
-        console.warn('⚠️ Erreur chargement signature:', error);
+        console.warn('⚠️ Erreur chargement signatures:', error);
     }
 }
 
-// Charger la signature au démarrage de l'application
+// Fonction helper pour désactiver/activer un bouton
+function setButtonState(buttonId, disabled, text) {
+    const button = document.getElementById(buttonId);
+    if (button) {
+        button.disabled = disabled;
+        button.textContent = text;
+    }
+}
+
+// Charger les signatures au démarrage de l'application
 window.addEventListener('DOMContentLoaded', () => {
-    loadLastSignature();
+    loadSavedSignatures();
 });
 
 // ============================================
