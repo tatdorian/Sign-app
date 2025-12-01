@@ -197,6 +197,39 @@ main {
     position: relative;
 }
 
+/* Conteneur des pages PDF */
+.pdf-pages-container {
+    display: flex;
+    flex-direction: column;
+    gap: 30px;
+    align-items: center;
+}
+
+.pdf-page-container {
+    position: relative;
+    margin-bottom: 20px;
+}
+
+.pdf-page-canvas {
+    max-width: 100%;
+    border: 2px solid #ddd;
+    border-radius: 10px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    display: block;
+}
+
+.page-label {
+    text-align: center;
+    margin-top: 10px;
+    font-weight: 600;
+    color: #667eea;
+    font-size: 1em;
+    background: rgba(102, 126, 234, 0.1);
+    padding: 8px 15px;
+    border-radius: 20px;
+    display: inline-block;
+}
+
 /* Contrôle de taille de la signature */
 .signature-size-control {
     margin-top: 20px;
@@ -249,8 +282,7 @@ main {
     border: none;
 }
 
-.document-preview img,
-.document-preview canvas {
+.document-preview img {
     max-width: 100%;
     border: 2px solid #ddd;
     border-radius: 10px;
@@ -566,5 +598,19 @@ footer {
         font-size: 0.75em;
         padding: 3px 10px;
         bottom: -25px;
+    }
+
+    /* Pages PDF responsive sur mobile */
+    .pdf-pages-container {
+        gap: 20px;
+    }
+
+    .pdf-page-container {
+        margin-bottom: 15px;
+    }
+
+    .page-label {
+        font-size: 0.9em;
+        padding: 6px 12px;
     }
 }
