@@ -7,7 +7,9 @@ const state = {
     isDrawing: false,
     pdfDoc: null,
     originalPdfBytes: null,
-    previewVisible: false
+    previewVisible: false,
+    signatureRotation: 0,
+    signatureScale: 1
 };
 
 // Éléments DOM
@@ -33,6 +35,24 @@ const cancelEmailBtn = document.getElementById('cancel-email-btn');
 // Configuration du canvas de signature
 ctx.lineJoin = 'round';
 ctx.lineCap = 'round';
+
+// Rendre le canvas responsive sur mobile
+function resizeCanvas() {
+    const isMobile = window.innerWidth <= 768;
+    if (isMobile) {
+        const container = signatureCanvas.parentElement;
+        const containerWidth = container.clientWidth - 40; // padding
+        signatureCanvas.width = containerWidth;
+        signatureCanvas.height = 300;
+    } else {
+        signatureCanvas.width = 600;
+        signatureCanvas.height = 200;
+    }
+}
+
+// Appeler au chargement et au redimensionnement
+window.addEventListener('load', resizeCanvas);
+window.addEventListener('resize', resizeCanvas);
 
 // Gestion de l'upload de fichier
 fileInput.addEventListener('change', handleFileUpload);
@@ -291,265 +311,51 @@ clearBtn.addEventListener('click', () => {
 });
 
 // ============================================
-// GESTION DES SIGNATURES MULTIPLES
+// SAUVEGARDE AUTOMATIQUE DE LA SIGNATURE
 // ============================================
 
-let savedSignatures = [];
-let selectedSignatureId = null;
+// Sauvegarder automatiquement la signature
+async function saveSignatureToDatabase() {
+    if (!state.signatureData) return;
 
-// Éléments DOM pour la gestion des signatures
-const saveSignatureBtn = document.getElementById('save-signature-btn');
-const signatureNameInput = document.getElementById('signature-name');
-const savedSignaturesList = document.getElementById('saved-signatures-list');
-
-// Bouton de sauvegarde
-if (saveSignatureBtn) {
-    saveSignatureBtn.addEventListener('click', async () => {
-        const signatureName = signatureNameInput.value.trim();
-
-        if (!state.signatureData) {
-            alert('Veuillez dessiner une signature d\'abord !');
-            return;
-        }
-
-        if (!signatureName) {
-            alert('Veuillez entrer un nom pour la signature');
-            signatureNameInput.focus();
-            return;
-        }
-
-        await saveNewSignature(signatureName);
-    });
-}
-
-// Sauvegarder une nouvelle signature
-async function saveNewSignature(name) {
     try {
-        setButtonState('save-signature-btn', true, '⏳ Sauvegarde...');
+        // Sauvegarder dans localStorage
+        localStorage.setItem('lastSignature', state.signatureData);
 
-        // Créer l'objet signature
-        const signature = {
-            id: `sig_${Date.now()}`,
-            name: name,
-            data: state.signatureData,
-            created_at: new Date().toISOString(),
-            width: parseInt(document.getElementById('signature-scale')?.value || 150),
-            color: document.getElementById('signature-color')?.value || '#000000'
-        };
-
-        // Sauvegarder dans Supabase
+        // Sauvegarder dans Supabase si disponible
         if (typeof saveSignatureTemplate === 'function') {
-            const result = await saveSignatureTemplate(name, state.signatureData);
-
-            if (result.success && result.data) {
-                signature.id = result.data.id;
-                signature.supabase_id = result.data.id;
-                console.log('✅ Signature sauvegardée dans Supabase:', signature.id);
-            } else {
-                console.warn('⚠️ Supabase non disponible, sauvegarde locale uniquement');
+            const result = await saveSignatureTemplate('Signature', state.signatureData);
+            if (result.success) {
+                console.log('✅ Signature sauvegardée dans Supabase');
             }
         }
-
-        // Sauvegarder dans localStorage comme backup
-        savedSignatures.push(signature);
-        localStorage.setItem('savedSignatures', JSON.stringify(savedSignatures));
-
-        // Sélectionner automatiquement la nouvelle signature
-        selectedSignatureId = signature.id;
-        localStorage.setItem('selectedSignatureId', selectedSignatureId);
-
-        // Rafraîchir l'affichage
-        displaySavedSignatures();
-
-        // Réinitialiser le formulaire
-        signatureNameInput.value = '';
-
-        // Message de succès
-        alert(`✅ Signature "${name}" sauvegardée avec succès !`);
-
-        setButtonState('save-signature-btn', false, '✅ Sauvegarder');
-
     } catch (error) {
-        console.error('❌ Erreur sauvegarde signature:', error);
-        alert('Erreur lors de la sauvegarde de la signature');
-        setButtonState('save-signature-btn', false, '✅ Sauvegarder');
+        console.warn('⚠️ Erreur sauvegarde signature:', error);
     }
 }
 
-// Afficher toutes les signatures sauvegardées
-function displaySavedSignatures() {
-    if (!savedSignaturesList) return;
-
-    if (savedSignatures.length === 0) {
-        savedSignaturesList.innerHTML = '<p class="no-signatures">Aucune signature sauvegardée</p>';
-        return;
-    }
-
-    savedSignaturesList.innerHTML = '';
-
-    savedSignatures.forEach(signature => {
-        const card = document.createElement('div');
-        card.className = `signature-card ${signature.id === selectedSignatureId ? 'selected' : ''}`;
-        card.onclick = () => selectSignature(signature.id);
-
-        card.innerHTML = `
-            <div class="signature-card-header">
-                <span class="signature-card-name">${signature.name}</span>
-                <div class="signature-card-actions">
-                    <button class="signature-card-btn delete" onclick="event.stopPropagation(); deleteSignature('${signature.id}')">
-                        🗑️
-                    </button>
-                </div>
-            </div>
-            <div class="signature-card-preview">
-                <img src="${signature.data}" alt="${signature.name}">
-            </div>
-            <div class="signature-card-date">
-                ${new Date(signature.created_at).toLocaleDateString('fr-FR', {
-                    day: 'numeric',
-                    month: 'long',
-                    year: 'numeric'
-                })}
-            </div>
-            ${signature.id === selectedSignatureId ? '<span class="signature-card-selected-badge">✓ Sélectionnée</span>' : ''}
-        `;
-
-        savedSignaturesList.appendChild(card);
-    });
-}
-
-// Sélectionner une signature
-function selectSignature(signatureId) {
-    const signature = savedSignatures.find(s => s.id === signatureId);
-    if (!signature) return;
-
-    selectedSignatureId = signatureId;
-    localStorage.setItem('selectedSignatureId', selectedSignatureId);
-
-    // Charger la signature sur le canvas
-    state.signatureData = signature.data;
-
-    const img = new Image();
-    img.onload = () => {
-        ctx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
-        ctx.drawImage(img, 0, 0, signatureCanvas.width, signatureCanvas.height);
-        console.log('✅ Signature sélectionnée:', signature.name);
-    };
-    img.src = signature.data;
-
-    // Mettre à jour l'affichage
-    displaySavedSignatures();
-
-    // Mettre à jour la prévisualisation si visible
-    if (state.previewVisible) {
-        updateSignaturePreview();
-    }
-}
-
-// Supprimer une signature
-async function deleteSignature(signatureId) {
-    if (!confirm('Êtes-vous sûr de vouloir supprimer cette signature ?')) {
-        return;
-    }
-
+// Charger la dernière signature au démarrage
+async function loadLastSignature() {
     try {
-        const signature = savedSignatures.find(s => s.id === signatureId);
-
-        // Supprimer de Supabase si elle a un ID Supabase
-        if (signature && signature.supabase_id && typeof supabaseClient !== 'undefined') {
-            // TODO: Ajouter une fonction de suppression dans supabase-client.js
-            console.log('🗑️ Suppression Supabase:', signature.supabase_id);
+        const localSignature = localStorage.getItem('lastSignature');
+        if (localSignature) {
+            state.signatureData = localSignature;
+            const img = new Image();
+            img.onload = () => {
+                ctx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
+                ctx.drawImage(img, 0, 0, signatureCanvas.width, signatureCanvas.height);
+                console.log('✅ Signature chargée');
+            };
+            img.src = state.signatureData;
         }
-
-        // Supprimer du tableau local
-        savedSignatures = savedSignatures.filter(s => s.id !== signatureId);
-        localStorage.setItem('savedSignatures', JSON.stringify(savedSignatures));
-
-        // Si c'était la signature sélectionnée, la déselectionner
-        if (selectedSignatureId === signatureId) {
-            selectedSignatureId = null;
-            localStorage.removeItem('selectedSignatureId');
-            // Effacer le canvas
-            ctx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
-            state.signatureData = null;
-        }
-
-        // Rafraîchir l'affichage
-        displaySavedSignatures();
-
-        console.log('✅ Signature supprimée');
-
     } catch (error) {
-        console.error('❌ Erreur suppression signature:', error);
-        alert('Erreur lors de la suppression de la signature');
+        console.warn('⚠️ Erreur chargement signature:', error);
     }
 }
 
-// Charger les signatures au démarrage
-async function loadSavedSignatures() {
-    try {
-        // Charger depuis localStorage
-        const localSignatures = localStorage.getItem('savedSignatures');
-        if (localSignatures) {
-            savedSignatures = JSON.parse(localSignatures);
-            console.log(`📋 ${savedSignatures.length} signature(s) chargée(s) depuis localStorage`);
-        }
-
-        // Charger depuis Supabase
-        if (typeof getSignatureTemplates === 'function') {
-            const result = await getSignatureTemplates();
-
-            if (result.success && result.data && result.data.length > 0) {
-                console.log(`📋 ${result.data.length} signature(s) trouvée(s) dans Supabase`);
-
-                // Fusionner avec les signatures locales
-                result.data.forEach(supabaseSignature => {
-                    // Vérifier si elle n'existe pas déjà
-                    const exists = savedSignatures.find(s => s.supabase_id === supabaseSignature.id);
-                    if (!exists) {
-                        savedSignatures.push({
-                            id: supabaseSignature.id,
-                            supabase_id: supabaseSignature.id,
-                            name: supabaseSignature.name,
-                            data: supabaseSignature.signature_data,
-                            created_at: supabaseSignature.created_at,
-                            width: supabaseSignature.default_width,
-                            color: supabaseSignature.default_color
-                        });
-                    }
-                });
-
-                // Sauvegarder dans localStorage
-                localStorage.setItem('savedSignatures', JSON.stringify(savedSignatures));
-            }
-        }
-
-        // Charger la signature sélectionnée
-        const savedSelectedId = localStorage.getItem('selectedSignatureId');
-        if (savedSelectedId) {
-            selectSignature(savedSelectedId);
-        }
-
-        // Afficher les signatures
-        displaySavedSignatures();
-
-    } catch (error) {
-        console.warn('⚠️ Erreur chargement signatures:', error);
-    }
-}
-
-// Fonction helper pour désactiver/activer un bouton
-function setButtonState(buttonId, disabled, text) {
-    const button = document.getElementById(buttonId);
-    if (button) {
-        button.disabled = disabled;
-        button.textContent = text;
-    }
-}
-
-// Charger les signatures au démarrage de l'application
+// Charger la signature au démarrage de l'application
 window.addEventListener('DOMContentLoaded', () => {
-    loadSavedSignatures();
+    loadLastSignature();
 });
 
 // ============================================
@@ -592,31 +398,6 @@ if (togglePreviewBtn) {
     });
 }
 
-// Mettre à jour la position et taille de la signature preview
-function updateSignaturePreviewPosition() {
-    if (!signaturePreview || !signatureOverlay) return;
-
-    const x = parseInt(signatureXInput.value);
-    const y = parseInt(signatureYInput.value);
-    const width = parseInt(signatureScaleInput.value);
-
-    // Calculer la position relative au document preview
-    const docCanvas = documentPreview.querySelector('canvas');
-    if (!docCanvas) return;
-
-    const docRect = docCanvas.getBoundingClientRect();
-    const previewRect = documentPreview.getBoundingClientRect();
-
-    // Position relative dans le preview
-    const relativeX = (x / 595) * docCanvas.width;
-    const relativeY = docCanvas.height - (y / 842) * docCanvas.height;
-
-    signaturePreview.style.left = `${relativeX}px`;
-    signaturePreview.style.top = `${relativeY}px`;
-    signaturePreview.style.width = `${width}px`;
-    signaturePreview.style.height = 'auto';
-}
-
 // Mettre à jour l'affichage de la valeur du scale
 signatureScaleInput.addEventListener('input', (e) => {
     scaleValueDisplay.textContent = `${e.target.value}px`;
@@ -638,22 +419,6 @@ signatureYInput.addEventListener('input', () => {
 signaturePreview.addEventListener('mousedown', startDrag);
 document.addEventListener('mousemove', drag);
 document.addEventListener('mouseup', stopDrag);
-
-// Support tactile
-signaturePreview.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    const touch = e.touches[0];
-    startDrag({ clientX: touch.clientX, clientY: touch.clientY });
-});
-
-document.addEventListener('touchmove', (e) => {
-    if (!isDragging) return;
-    e.preventDefault();
-    const touch = e.touches[0];
-    drag({ clientX: touch.clientX, clientY: touch.clientY });
-});
-
-document.addEventListener('touchend', stopDrag);
 
 function startDrag(e) {
     isDragging = true;
@@ -698,6 +463,117 @@ function stopDrag() {
         isDragging = false;
         signaturePreview.style.cursor = 'move';
     }
+}
+
+// ============================================
+// GESTES TACTILES - Pinch to Zoom et Rotation
+// ============================================
+
+let touchStartDistance = 0;
+let touchStartAngle = 0;
+let lastScale = 1;
+let lastRotation = 0;
+
+// Calculer la distance entre deux points tactiles
+function getDistance(touch1, touch2) {
+    const dx = touch2.clientX - touch1.clientX;
+    const dy = touch2.clientY - touch1.clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+}
+
+// Calculer l'angle entre deux points tactiles
+function getAngle(touch1, touch2) {
+    const dx = touch2.clientX - touch1.clientX;
+    const dy = touch2.clientY - touch1.clientY;
+    return Math.atan2(dy, dx) * 180 / Math.PI;
+}
+
+// Gestion des gestes tactiles sur la signature
+signaturePreview.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 2) {
+        e.preventDefault();
+        // Deux doigts : pinch to zoom et rotation
+        touchStartDistance = getDistance(e.touches[0], e.touches[1]);
+        touchStartAngle = getAngle(e.touches[0], e.touches[1]);
+        lastScale = state.signatureScale;
+        lastRotation = state.signatureRotation;
+    } else if (e.touches.length === 1) {
+        // Un doigt : drag (déjà géré plus haut)
+        const touch = e.touches[0];
+        startDrag({ clientX: touch.clientX, clientY: touch.clientY });
+    }
+});
+
+signaturePreview.addEventListener('touchmove', (e) => {
+    if (e.touches.length === 2) {
+        e.preventDefault();
+
+        // Calculer le nouveau zoom
+        const currentDistance = getDistance(e.touches[0], e.touches[1]);
+        const scaleChange = currentDistance / touchStartDistance;
+        state.signatureScale = Math.max(0.5, Math.min(3, lastScale * scaleChange));
+
+        // Calculer la nouvelle rotation
+        const currentAngle = getAngle(e.touches[0], e.touches[1]);
+        const angleDiff = currentAngle - touchStartAngle;
+        state.signatureRotation = lastRotation + angleDiff;
+
+        // Appliquer les transformations
+        applySignatureTransform();
+
+    } else if (e.touches.length === 1 && isDragging) {
+        // Un doigt : drag
+        e.preventDefault();
+        const touch = e.touches[0];
+        drag({ clientX: touch.clientX, clientY: touch.clientY });
+    }
+});
+
+signaturePreview.addEventListener('touchend', (e) => {
+    if (e.touches.length < 2) {
+        touchStartDistance = 0;
+        touchStartAngle = 0;
+    }
+    if (e.touches.length === 0) {
+        stopDrag();
+    }
+});
+
+// Appliquer les transformations CSS à la signature
+function applySignatureTransform() {
+    if (signaturePreview) {
+        const transform = `scale(${state.signatureScale}) rotate(${state.signatureRotation}deg)`;
+        signaturePreview.style.transform = transform;
+        signaturePreview.style.transformOrigin = 'center center';
+    }
+}
+
+// Mettre à jour la position de la signature avec les transformations
+function updateSignaturePreviewPosition() {
+    if (!signaturePreview || !signatureOverlay) return;
+
+    const x = parseInt(signatureXInput.value);
+    const y = parseInt(signatureYInput.value);
+    const width = parseInt(signatureScaleInput.value);
+
+    // Calculer la position relative au document preview
+    const docCanvas = documentPreview.querySelector('canvas');
+    if (!docCanvas) return;
+
+    const docRect = docCanvas.getBoundingClientRect();
+    const previewRect = documentPreview.getBoundingClientRect();
+
+    // Position relative dans le preview
+    const relativeX = (x / 595) * docCanvas.width;
+    const relativeY = docCanvas.height - (y / 842) * docCanvas.height;
+
+    signaturePreview.style.left = `${relativeX}px`;
+    signaturePreview.style.top = `${relativeY}px`;
+    signaturePreview.style.width = `${width}px`;
+    signaturePreview.style.height = 'auto';
+
+    // Appliquer les transformations (zoom et rotation)
+    applySignatureTransform();
 }
 
 // Générer le PDF avec signature
@@ -771,15 +647,21 @@ async function createSignedPDF() {
 
     const signatureX = parseInt(document.getElementById('signature-x').value);
     const signatureY = parseInt(document.getElementById('signature-y').value);
-    const signatureScale = parseInt(document.getElementById('signature-scale').value);
+    const signatureBaseScale = parseInt(document.getElementById('signature-scale').value);
 
-    const signatureDims = signatureImage.scale(signatureScale / signatureImage.width);
+    // Appliquer l'échelle de base et l'échelle du geste tactile
+    const finalScale = signatureBaseScale * state.signatureScale;
+    const signatureDims = signatureImage.scale(finalScale / signatureImage.width);
+
+    // Convertir la rotation en radians pour pdf-lib
+    const rotationRadians = (state.signatureRotation * Math.PI) / 180;
 
     firstPage.drawImage(signatureImage, {
         x: signatureX,
         y: signatureY,
         width: signatureDims.width,
         height: signatureDims.height,
+        rotate: { angle: rotationRadians, type: 'radians' }
     });
 
     return await pdfDoc.save();
