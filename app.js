@@ -9,7 +9,10 @@ const state = {
     isDrawingParaphe: false,
     pdfDoc: null,
     originalPdfBytes: null,
-    signatureScale: 1
+    signatureScale: 1,
+    totalPages: 1,
+    currentPage: 1,
+    signaturePage: 1
 };
 
 // Éléments DOM
@@ -210,22 +213,66 @@ async function loadPDF(file) {
     const loadingTask = pdfjsLib.getDocument(arrayBuffer);
     const pdf = await loadingTask.promise;
 
-    // Afficher la première page
-    const page = await pdf.getPage(1);
-    const scale = 1.5;
-    const viewport = page.getViewport({ scale });
+    // Vider le contenu précédent (sauf l'overlay)
+    const children = Array.from(documentPreview.children);
+    children.forEach(child => {
+        if (child.id !== 'signature-overlay' && child.id !== 'signature-size-control') {
+            child.remove();
+        }
+    });
 
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
-    canvas.height = viewport.height;
-    canvas.width = viewport.width;
+    // Créer un conteneur pour toutes les pages
+    const pagesContainer = document.createElement('div');
+    pagesContainer.className = 'pdf-pages-container';
+    pagesContainer.id = 'pdf-pages-container';
 
-    await page.render({
-        canvasContext: context,
-        viewport: viewport
-    }).promise;
+    // Afficher toutes les pages
+    const numPages = pdf.numPages;
+    for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+        const page = await pdf.getPage(pageNum);
+        const scale = 1.5;
+        const viewport = page.getViewport({ scale });
 
-    documentPreview.appendChild(canvas);
+        // Créer un conteneur pour chaque page
+        const pageContainer = document.createElement('div');
+        pageContainer.className = 'pdf-page-container';
+        pageContainer.dataset.pageNumber = pageNum;
+
+        // Créer le canvas pour la page
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+        canvas.className = 'pdf-page-canvas';
+
+        await page.render({
+            canvasContext: context,
+            viewport: viewport
+        }).promise;
+
+        // Ajouter le numéro de page
+        const pageLabel = document.createElement('div');
+        pageLabel.className = 'page-label';
+        pageLabel.textContent = `Page ${pageNum}/${numPages}`;
+
+        pageContainer.appendChild(canvas);
+        pageContainer.appendChild(pageLabel);
+        pagesContainer.appendChild(pageContainer);
+    }
+
+    // Insérer le conteneur avant l'overlay
+    const signatureOverlay = document.getElementById('signature-overlay');
+    if (signatureOverlay) {
+        documentPreview.insertBefore(pagesContainer, signatureOverlay);
+    } else {
+        documentPreview.appendChild(pagesContainer);
+    }
+
+    // Stocker le nombre de pages
+    state.totalPages = numPages;
+    state.currentPage = 1;
+
+    console.log(`✅ PDF chargé : ${numPages} page(s)`);
 }
 
 // Charger et afficher une image
@@ -637,6 +684,8 @@ function stopDrag() {
     if (isDragging) {
         isDragging = false;
         signaturePreview.style.cursor = 'move';
+        // Détecter sur quelle page la signature a été placée
+        detectSignaturePage();
     }
 }
 
@@ -647,23 +696,62 @@ function updateSignaturePreviewPosition() {
     signaturePreview.style.width = `${currentSignatureWidth}px`;
     signaturePreview.style.height = 'auto';
 
-    // Position initiale au centre du document
+    // Position initiale au centre de la première page
     if (!signaturePreview.style.left || signaturePreview.style.left === '0px') {
-        const docCanvas = documentPreview.querySelector('canvas');
-        if (docCanvas) {
-            const docRect = docCanvas.getBoundingClientRect();
-            // Centrer la signature
-            const centerX = (docRect.width - currentSignatureWidth) / 2;
-            const centerY = docRect.height / 2;
+        const pagesContainer = document.getElementById('pdf-pages-container');
+        const firstPageContainer = pagesContainer ? pagesContainer.querySelector('.pdf-page-container') : null;
+        const firstCanvas = firstPageContainer ? firstPageContainer.querySelector('.pdf-page-canvas') : documentPreview.querySelector('canvas');
+
+        if (firstCanvas) {
+            const canvasRect = firstCanvas.getBoundingClientRect();
+            const containerRect = documentPreview.getBoundingClientRect();
+
+            // Calculer la position relative au conteneur documentPreview
+            const relativeTop = canvasRect.top - containerRect.top;
+            const relativeLeft = canvasRect.left - containerRect.left;
+
+            // Centrer la signature sur la première page
+            const centerX = relativeLeft + (canvasRect.width - currentSignatureWidth) / 2;
+            const centerY = relativeTop + canvasRect.height / 2;
 
             signaturePreview.style.left = `${Math.max(10, centerX)}px`;
             signaturePreview.style.top = `${Math.max(10, centerY)}px`;
+
+            // Définir la page de signature
+            state.signaturePage = 1;
         } else {
             // Fallback si pas de canvas
             signaturePreview.style.left = '50px';
             signaturePreview.style.top = '50px';
         }
     }
+}
+
+// Détecter sur quelle page la signature est placée
+function detectSignaturePage() {
+    if (!signaturePreview || !signatureOverlay) return 1;
+
+    const sigRect = signaturePreview.getBoundingClientRect();
+    const sigCenterY = sigRect.top + sigRect.height / 2;
+
+    const pagesContainer = document.getElementById('pdf-pages-container');
+    if (!pagesContainer) return 1;
+
+    const pageContainers = pagesContainer.querySelectorAll('.pdf-page-container');
+
+    for (let i = 0; i < pageContainers.length; i++) {
+        const pageContainer = pageContainers[i];
+        const pageRect = pageContainer.getBoundingClientRect();
+
+        // Vérifier si le centre de la signature est dans cette page
+        if (sigCenterY >= pageRect.top && sigCenterY <= pageRect.bottom) {
+            state.signaturePage = parseInt(pageContainer.dataset.pageNumber);
+            console.log(`📝 Signature sur la page ${state.signaturePage}`);
+            return state.signaturePage;
+        }
+    }
+
+    return 1;
 }
 
 // Générer le PDF avec signature
@@ -734,29 +822,41 @@ async function createSignedPDF() {
     const signatureImageBytes = await fetch(state.signatureData).then(res => res.arrayBuffer());
     const signatureImage = await pdfDoc.embedPng(signatureImageBytes);
 
+    // Détecter la page sur laquelle placer la signature
+    const targetPageNum = detectSignaturePage();
+    const targetPage = pages[targetPageNum - 1]; // Les pages sont indexées à partir de 0
+
     // Calculer la position de la signature depuis la prévisualisation
-    const docCanvas = documentPreview.querySelector('canvas');
+    const pagesContainer = document.getElementById('pdf-pages-container');
+    const targetPageContainer = pagesContainer ? pagesContainer.querySelector(`.pdf-page-container[data-page-number="${targetPageNum}"]`) : null;
+    const targetCanvas = targetPageContainer ? targetPageContainer.querySelector('.pdf-page-canvas') : documentPreview.querySelector('canvas');
+
     const signatureLeft = parseFloat(signaturePreview.style.left) || 50;
     const signatureTop = parseFloat(signaturePreview.style.top) || 50;
 
     let signatureX = 50;
     let signatureY = 700;
 
-    if (docCanvas) {
-        const docRect = docCanvas.getBoundingClientRect();
+    if (targetCanvas) {
+        const canvasRect = targetCanvas.getBoundingClientRect();
+        const containerRect = documentPreview.getBoundingClientRect();
         const sigRect = signaturePreview.getBoundingClientRect();
 
+        // Position de la signature relative au canvas de la page
+        const relativeLeft = signatureLeft - (canvasRect.left - containerRect.left);
+        const relativeTop = signatureTop - (canvasRect.top - containerRect.top);
+
         // Convertir en coordonnées PDF (A4: 595x842 points)
-        signatureX = Math.round((signatureLeft / docRect.width) * 595);
-        signatureY = Math.round(842 - ((signatureTop + sigRect.height) / docRect.height) * 842);
+        signatureX = Math.round((relativeLeft / canvasRect.width) * 595);
+        signatureY = Math.round(842 - ((relativeTop + sigRect.height) / canvasRect.height) * 842);
     }
 
     // Utiliser la taille actuelle (du slider)
     const signatureDims = signatureImage.scale(currentSignatureWidth / signatureImage.width);
 
-    // Ajouter la signature sur la première page
-    const firstPage = pages[0];
-    firstPage.drawImage(signatureImage, {
+    // Ajouter la signature sur la page cible
+    console.log(`✍️ Ajout de la signature sur la page ${targetPageNum}`);
+    targetPage.drawImage(signatureImage, {
         x: signatureX,
         y: signatureY,
         width: signatureDims.width,
