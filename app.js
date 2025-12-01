@@ -301,7 +301,12 @@ sendEmailBtn.addEventListener('click', async () => {
         const pdfBytes = await createSignedPDF();
         const pdfBase64 = btoa(String.fromCharCode(...new Uint8Array(pdfBytes)));
 
-        const response = await fetch('http://localhost:3000/send-email', {
+        // Utiliser l'API relative pour Vercel (fonctionne aussi en local avec server.js)
+        const apiUrl = window.location.hostname === 'localhost'
+            ? 'http://localhost:3000/send-email'
+            : '/api/send-email';
+
+        const response = await fetch(apiUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
