@@ -161,6 +161,12 @@ async function handleFileUpload(e) {
     signatureSection.style.display = 'block';
     positionSection.style.display = 'block';
     actionsSection.style.display = 'block';
+
+    // Afficher le contrôle de taille de la signature
+    const sizeControl = document.getElementById('signature-size-control');
+    if (sizeControl) {
+        sizeControl.style.display = 'block';
+    }
 }
 
 // Charger et afficher un PDF
@@ -370,9 +376,38 @@ const signatureYInput = document.getElementById('signature-y');
 const signatureScaleInput = document.getElementById('signature-scale');
 const scaleValueDisplay = document.getElementById('scale-value');
 
+// Nouveau slider de taille sous le PDF
+const signatureSizeSlider = document.getElementById('signature-size-slider');
+const sizeValueDisplay = document.getElementById('size-value-display');
+
 let isDragging = false;
 let dragStartX = 0;
 let dragStartY = 0;
+let currentSignatureWidth = 150; // Taille par défaut
+
+// Gestion du slider de taille sous le PDF
+if (signatureSizeSlider && sizeValueDisplay) {
+    signatureSizeSlider.addEventListener('input', (e) => {
+        currentSignatureWidth = parseInt(e.target.value);
+        sizeValueDisplay.textContent = `${currentSignatureWidth}px`;
+
+        if (state.previewVisible && signaturePreview) {
+            // Mettre à jour la largeur de la signature
+            signaturePreview.style.width = `${currentSignatureWidth}px`;
+
+            // Synchroniser avec l'ancien contrôle si nécessaire
+            if (signatureScaleInput) {
+                signatureScaleInput.value = currentSignatureWidth;
+            }
+            if (scaleValueDisplay) {
+                scaleValueDisplay.textContent = `${currentSignatureWidth}px`;
+            }
+
+            // Contraindre aux limites après le changement de taille
+            constrainSignaturePosition();
+        }
+    });
+}
 
 // Toggle affichage de la signature sur le document
 if (togglePreviewBtn) {
@@ -420,11 +455,52 @@ signaturePreview.addEventListener('mousedown', startDrag);
 document.addEventListener('mousemove', drag);
 document.addEventListener('mouseup', stopDrag);
 
+// Fonction pour contraindre la signature aux limites du PDF
+function constrainSignaturePosition() {
+    if (!signaturePreview || !documentPreview) return;
+
+    const docCanvas = documentPreview.querySelector('canvas');
+    if (!docCanvas) return;
+
+    const docRect = docCanvas.getBoundingClientRect();
+    const sigRect = signaturePreview.getBoundingClientRect();
+
+    // Récupérer la position actuelle
+    let currentLeft = parseFloat(signaturePreview.style.left) || 0;
+    let currentTop = parseFloat(signaturePreview.style.top) || 0;
+
+    // Calculer les dimensions effectives avec le scale
+    const effectiveWidth = sigRect.width;
+    const effectiveHeight = sigRect.height;
+
+    // Contraindre aux limites
+    const maxX = docRect.width - effectiveWidth;
+    const maxY = docRect.height - effectiveHeight;
+
+    currentLeft = Math.max(0, Math.min(currentLeft, maxX));
+    currentTop = Math.max(0, Math.min(currentTop, maxY));
+
+    // Appliquer les nouvelles positions
+    signaturePreview.style.left = `${currentLeft}px`;
+    signaturePreview.style.top = `${currentTop}px`;
+
+    // Mettre à jour les inputs de coordonnées PDF
+    const pdfX = Math.round((currentLeft / docRect.width) * 595);
+    const pdfY = Math.round(842 - ((currentTop + effectiveHeight) / docRect.height) * 842);
+
+    if (signatureXInput) signatureXInput.value = pdfX;
+    if (signatureYInput) signatureYInput.value = pdfY;
+}
+
 function startDrag(e) {
     isDragging = true;
     const rect = signaturePreview.getBoundingClientRect();
-    dragStartX = e.clientX - rect.left;
-    dragStartY = e.clientY - rect.top;
+    const docCanvas = documentPreview.querySelector('canvas');
+    if (docCanvas) {
+        const docRect = docCanvas.getBoundingClientRect();
+        dragStartX = e.clientX - rect.left;
+        dragStartY = e.clientY - rect.top;
+    }
     signaturePreview.style.cursor = 'grabbing';
 }
 
@@ -435,15 +511,22 @@ function drag(e) {
     if (!docCanvas) return;
 
     const docRect = docCanvas.getBoundingClientRect();
-    const previewRect = documentPreview.getBoundingClientRect();
 
     // Position de la souris relative au document
     let mouseX = e.clientX - docRect.left - dragStartX;
     let mouseY = e.clientY - docRect.top - dragStartY;
 
-    // Limiter aux bords du document
-    mouseX = Math.max(0, Math.min(mouseX, docRect.width - signaturePreview.offsetWidth));
-    mouseY = Math.max(0, Math.min(mouseY, docRect.height - signaturePreview.offsetHeight));
+    // Calculer les dimensions effectives de la signature avec le scale
+    const sigRect = signaturePreview.getBoundingClientRect();
+    const effectiveWidth = sigRect.width;
+    const effectiveHeight = sigRect.height;
+
+    // Limiter aux bords du document (contrainte stricte)
+    const maxX = docRect.width - effectiveWidth;
+    const maxY = docRect.height - effectiveHeight;
+
+    mouseX = Math.max(0, Math.min(mouseX, maxX));
+    mouseY = Math.max(0, Math.min(mouseY, maxY));
 
     // Mettre à jour la position visuelle
     signaturePreview.style.left = `${mouseX}px`;
@@ -451,11 +534,11 @@ function drag(e) {
 
     // Convertir en coordonnées PDF (A4: 595x842 points)
     const pdfX = Math.round((mouseX / docRect.width) * 595);
-    const pdfY = Math.round(842 - ((mouseY + signaturePreview.offsetHeight) / docRect.height) * 842);
+    const pdfY = Math.round(842 - ((mouseY + effectiveHeight) / docRect.height) * 842);
 
     // Mettre à jour les inputs
-    signatureXInput.value = pdfX;
-    signatureYInput.value = pdfY;
+    if (signatureXInput) signatureXInput.value = pdfX;
+    if (signatureYInput) signatureYInput.value = pdfY;
 }
 
 function stopDrag() {
@@ -545,6 +628,9 @@ function applySignatureTransform() {
         const transform = `scale(${state.signatureScale}) rotate(${state.signatureRotation}deg)`;
         signaturePreview.style.transform = transform;
         signaturePreview.style.transformOrigin = 'center center';
+
+        // Contraindre aux limites après transformation
+        setTimeout(() => constrainSignaturePosition(), 10);
     }
 }
 
@@ -554,7 +640,6 @@ function updateSignaturePreviewPosition() {
 
     const x = parseInt(signatureXInput.value);
     const y = parseInt(signatureYInput.value);
-    const width = parseInt(signatureScaleInput.value);
 
     // Calculer la position relative au document preview
     const docCanvas = documentPreview.querySelector('canvas');
@@ -569,7 +654,7 @@ function updateSignaturePreviewPosition() {
 
     signaturePreview.style.left = `${relativeX}px`;
     signaturePreview.style.top = `${relativeY}px`;
-    signaturePreview.style.width = `${width}px`;
+    signaturePreview.style.width = `${currentSignatureWidth}px`;
     signaturePreview.style.height = 'auto';
 
     // Appliquer les transformations (zoom et rotation)
@@ -647,10 +732,9 @@ async function createSignedPDF() {
 
     const signatureX = parseInt(document.getElementById('signature-x').value);
     const signatureY = parseInt(document.getElementById('signature-y').value);
-    const signatureBaseScale = parseInt(document.getElementById('signature-scale').value);
 
-    // Appliquer l'échelle de base et l'échelle du geste tactile
-    const finalScale = signatureBaseScale * state.signatureScale;
+    // Utiliser la taille actuelle (du slider) et l'échelle du geste tactile
+    const finalScale = currentSignatureWidth * state.signatureScale;
     const signatureDims = signatureImage.scale(finalScale / signatureImage.width);
 
     // Convertir la rotation en radians pour pdf-lib
