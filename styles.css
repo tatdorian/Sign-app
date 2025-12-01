@@ -334,6 +334,49 @@ main {
     flex-wrap: wrap;
 }
 
+/* Contrôles du paraphe */
+.paraphe-controls {
+    margin-top: 20px;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 10px;
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.paraphe-controls label {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-weight: 600;
+    color: #667eea;
+}
+
+.paraphe-controls input[type="range"] {
+    width: 200px;
+}
+
+.paraphe-controls select {
+    padding: 8px 12px;
+    border: 2px solid #667eea;
+    border-radius: 5px;
+    font-size: 1em;
+    cursor: pointer;
+    background: white;
+}
+
+#paraphe-canvas {
+    border: 3px solid #764ba2;
+    border-radius: 10px;
+    cursor: crosshair;
+    background: white;
+    display: block;
+    margin: 0 auto;
+    touch-action: none;
+}
+
 .signature-controls label {
     font-weight: 600;
     color: #333;
@@ -486,14 +529,24 @@ footer {
         max-width: 100%;
     }
 
+    /* Canvas de paraphe adapté sur mobile */
+    #paraphe-canvas {
+        width: 100%;
+        height: 200px;
+        max-width: 100%;
+    }
+
     .signature-controls,
-    .position-controls,
     .actions {
         flex-direction: column;
         align-items: stretch;
     }
 
-    .position-controls input {
+    .paraphe-controls {
+        flex-direction: column;
+    }
+
+    .paraphe-controls input[type="range"] {
         width: 100%;
     }
 }
