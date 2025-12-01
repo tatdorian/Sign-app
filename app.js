@@ -746,7 +746,7 @@ async function createSignedPDF() {
             let parapheX, parapheY;
             const pageWidth = page.getWidth();
             const pageHeight = page.getHeight();
-            const margin = 5;
+            const margin = 15;
 
             switch (paraphePosition) {
                 case 'bottom-right':
