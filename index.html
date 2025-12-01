@@ -17,12 +17,17 @@
             <!-- Section 1: Upload de document -->
             <section class="card" id="upload-section">
                 <h2>1. Télécharger un document</h2>
-                <div class="upload-area">
+                <div class="upload-area" id="drop-zone">
                     <input type="file" id="file-input" accept=".pdf,image/*" hidden>
-                    <button class="btn btn-primary" onclick="document.getElementById('file-input').click()">
-                        📁 Choisir un fichier
-                    </button>
-                    <p class="file-info" id="file-info">Aucun fichier sélectionné</p>
+                    <div class="drop-zone-content">
+                        <div class="drop-icon">📄</div>
+                        <p class="drop-text">Glissez-déposez un document ici</p>
+                        <p class="drop-text-or">ou</p>
+                        <button class="btn btn-primary" onclick="document.getElementById('file-input').click()">
+                            📁 Choisir un fichier
+                        </button>
+                        <p class="file-info" id="file-info">PDF ou Image (JPG, PNG)</p>
+                    </div>
                 </div>
                 <div id="document-preview" class="document-preview">
                     <!-- Zone interactive pour positionner la signature -->
