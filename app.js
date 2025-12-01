@@ -4,11 +4,11 @@ const state = {
     uploadedFile: null,
     uploadedFileType: null,
     signatureData: null,
+    parapheData: null,
     isDrawing: false,
+    isDrawingParaphe: false,
     pdfDoc: null,
     originalPdfBytes: null,
-    previewVisible: false,
-    signatureRotation: 0,
     signatureScale: 1
 };
 
@@ -17,7 +17,7 @@ const fileInput = document.getElementById('file-input');
 const fileInfo = document.getElementById('file-info');
 const documentPreview = document.getElementById('document-preview');
 const signatureSection = document.getElementById('signature-section');
-const positionSection = document.getElementById('position-section');
+const parapheSection = document.getElementById('paraphe-section');
 const actionsSection = document.getElementById('actions-section');
 
 const signatureCanvas = document.getElementById('signature-canvas');
@@ -25,6 +25,12 @@ const ctx = signatureCanvas.getContext('2d');
 const clearBtn = document.getElementById('clear-signature');
 const colorInput = document.getElementById('signature-color');
 const widthInput = document.getElementById('signature-width');
+
+const parapheCanvas = document.getElementById('paraphe-canvas');
+const ctxParaphe = parapheCanvas ? parapheCanvas.getContext('2d') : null;
+const clearParapheBtn = document.getElementById('clear-paraphe');
+const parapheColorInput = document.getElementById('paraphe-color');
+const parapheWidthInput = document.getElementById('paraphe-width');
 
 const downloadBtn = document.getElementById('download-btn');
 const emailBtn = document.getElementById('email-btn');
@@ -36,6 +42,12 @@ const cancelEmailBtn = document.getElementById('cancel-email-btn');
 ctx.lineJoin = 'round';
 ctx.lineCap = 'round';
 
+// Configuration du canvas de paraphe
+if (ctxParaphe) {
+    ctxParaphe.lineJoin = 'round';
+    ctxParaphe.lineCap = 'round';
+}
+
 // Rendre le canvas responsive sur mobile
 function resizeCanvas() {
     const isMobile = window.innerWidth <= 768;
@@ -44,9 +56,19 @@ function resizeCanvas() {
         const containerWidth = container.clientWidth - 40; // padding
         signatureCanvas.width = containerWidth;
         signatureCanvas.height = 300;
+
+        if (parapheCanvas) {
+            parapheCanvas.width = containerWidth;
+            parapheCanvas.height = 200;
+        }
     } else {
         signatureCanvas.width = 600;
         signatureCanvas.height = 200;
+
+        if (parapheCanvas) {
+            parapheCanvas.width = 400;
+            parapheCanvas.height = 150;
+        }
     }
 }
 
@@ -159,7 +181,7 @@ async function handleFileUpload(e) {
 
     // Afficher les sections suivantes
     signatureSection.style.display = 'block';
-    positionSection.style.display = 'block';
+    parapheSection.style.display = 'block';
     actionsSection.style.display = 'block';
 
     // Afficher le contrôle de taille de la signature
@@ -289,18 +311,19 @@ async function stopDrawing() {
         // Sauvegarder automatiquement dans Supabase
         await saveSignatureToDatabase();
 
-        // Mettre à jour la prévisualisation si visible
-        updateSignaturePreview();
+        // Afficher automatiquement la signature sur le document
+        showSignatureOnDocument();
     }
 }
 
-// Fonction pour mettre à jour la prévisualisation de la signature
-function updateSignaturePreview() {
+// Afficher automatiquement la signature sur le document
+function showSignatureOnDocument() {
     const signaturePreview = document.getElementById('signature-preview');
     const signatureOverlay = document.getElementById('signature-overlay');
 
-    if (state.signatureData && signaturePreview && state.previewVisible) {
+    if (state.signatureData && signaturePreview && signatureOverlay) {
         signaturePreview.src = state.signatureData;
+        signatureOverlay.style.display = 'block';
         updateSignaturePreviewPosition();
     }
 }
@@ -309,12 +332,113 @@ function updateSignaturePreview() {
 clearBtn.addEventListener('click', () => {
     ctx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
     state.signatureData = null;
-    // Masquer la prévisualisation
+    // Masquer la signature du document
     const signatureOverlay = document.getElementById('signature-overlay');
     if (signatureOverlay) {
         signatureOverlay.style.display = 'none';
     }
 });
+
+// ============================================
+// GESTION DU PARAPHE
+// ============================================
+
+let lastXParaphe = 0;
+let lastYParaphe = 0;
+
+// Dessin du paraphe - Souris
+if (parapheCanvas) {
+    parapheCanvas.addEventListener('mousedown', startDrawingParaphe);
+    parapheCanvas.addEventListener('mousemove', drawParaphe);
+    parapheCanvas.addEventListener('mouseup', stopDrawingParaphe);
+    parapheCanvas.addEventListener('mouseout', stopDrawingParaphe);
+
+    // Support tactile
+    parapheCanvas.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        const touch = e.touches[0];
+        const rect = parapheCanvas.getBoundingClientRect();
+        lastXParaphe = touch.clientX - rect.left;
+        lastYParaphe = touch.clientY - rect.top;
+        state.isDrawingParaphe = true;
+    });
+
+    parapheCanvas.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        if (!state.isDrawingParaphe) return;
+
+        const touch = e.touches[0];
+        const rect = parapheCanvas.getBoundingClientRect();
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+
+        ctxParaphe.strokeStyle = parapheColorInput.value;
+        ctxParaphe.lineWidth = parapheWidthInput.value;
+        ctxParaphe.beginPath();
+        ctxParaphe.moveTo(lastXParaphe, lastYParaphe);
+        ctxParaphe.lineTo(x, y);
+        ctxParaphe.stroke();
+
+        lastXParaphe = x;
+        lastYParaphe = y;
+    });
+
+    parapheCanvas.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        state.isDrawingParaphe = false;
+        state.parapheData = parapheCanvas.toDataURL();
+    });
+}
+
+function startDrawingParaphe(e) {
+    state.isDrawingParaphe = true;
+    const rect = parapheCanvas.getBoundingClientRect();
+    lastXParaphe = e.clientX - rect.left;
+    lastYParaphe = e.clientY - rect.top;
+}
+
+function drawParaphe(e) {
+    if (!state.isDrawingParaphe) return;
+
+    const rect = parapheCanvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    ctxParaphe.strokeStyle = parapheColorInput.value;
+    ctxParaphe.lineWidth = parapheWidthInput.value;
+    ctxParaphe.beginPath();
+    ctxParaphe.moveTo(lastXParaphe, lastYParaphe);
+    ctxParaphe.lineTo(x, y);
+    ctxParaphe.stroke();
+
+    lastXParaphe = x;
+    lastYParaphe = y;
+}
+
+function stopDrawingParaphe() {
+    if (state.isDrawingParaphe) {
+        state.isDrawingParaphe = false;
+        state.parapheData = parapheCanvas.toDataURL();
+    }
+}
+
+// Effacer le paraphe
+if (clearParapheBtn) {
+    clearParapheBtn.addEventListener('click', () => {
+        ctxParaphe.clearRect(0, 0, parapheCanvas.width, parapheCanvas.height);
+        state.parapheData = null;
+    });
+}
+
+// Gestion du slider de taille du paraphe
+const parapheSizeSlider = document.getElementById('paraphe-size');
+const parapheSizeValue = document.getElementById('paraphe-size-value');
+
+if (parapheSizeSlider && parapheSizeValue) {
+    parapheSizeSlider.addEventListener('input', (e) => {
+        parapheSizeValue.textContent = `${e.target.value}px`;
+    });
+}
 
 // ============================================
 // SAUVEGARDE AUTOMATIQUE DE LA SIGNATURE
@@ -370,11 +494,6 @@ window.addEventListener('DOMContentLoaded', () => {
 
 const signatureOverlay = document.getElementById('signature-overlay');
 const signaturePreview = document.getElementById('signature-preview');
-const togglePreviewBtn = document.getElementById('toggle-preview-btn');
-const signatureXInput = document.getElementById('signature-x');
-const signatureYInput = document.getElementById('signature-y');
-const signatureScaleInput = document.getElementById('signature-scale');
-const scaleValueDisplay = document.getElementById('scale-value');
 
 // Nouveau slider de taille sous le PDF
 const signatureSizeSlider = document.getElementById('signature-size-slider');
@@ -391,17 +510,9 @@ if (signatureSizeSlider && sizeValueDisplay) {
         currentSignatureWidth = parseInt(e.target.value);
         sizeValueDisplay.textContent = `${currentSignatureWidth}px`;
 
-        if (state.previewVisible && signaturePreview) {
+        if (signaturePreview && signatureOverlay.style.display !== 'none') {
             // Mettre à jour la largeur de la signature
             signaturePreview.style.width = `${currentSignatureWidth}px`;
-
-            // Synchroniser avec l'ancien contrôle si nécessaire
-            if (signatureScaleInput) {
-                signatureScaleInput.value = currentSignatureWidth;
-            }
-            if (scaleValueDisplay) {
-                scaleValueDisplay.textContent = `${currentSignatureWidth}px`;
-            }
 
             // Contraindre aux limites après le changement de taille
             constrainSignaturePosition();
@@ -409,51 +520,28 @@ if (signatureSizeSlider && sizeValueDisplay) {
     });
 }
 
-// Toggle affichage de la signature sur le document
-if (togglePreviewBtn) {
-    togglePreviewBtn.addEventListener('click', () => {
-        if (!state.signatureData) {
-            alert('Veuillez créer une signature d\'abord!');
-            return;
-        }
-
-        state.previewVisible = !state.previewVisible;
-
-        if (state.previewVisible) {
-            // Afficher la signature
-            signaturePreview.src = state.signatureData;
-            updateSignaturePreviewPosition();
-            signatureOverlay.style.display = 'block';
-            togglePreviewBtn.textContent = '👁️ Masquer la signature';
-        } else {
-            // Masquer la signature
-            signatureOverlay.style.display = 'none';
-            togglePreviewBtn.textContent = '👁️ Afficher la signature';
-        }
-    });
-}
-
-// Mettre à jour l'affichage de la valeur du scale
-signatureScaleInput.addEventListener('input', (e) => {
-    scaleValueDisplay.textContent = `${e.target.value}px`;
-    if (state.previewVisible) {
-        updateSignaturePreviewPosition();
-    }
-});
-
-// Mettre à jour la position quand les inputs changent
-signatureXInput.addEventListener('input', () => {
-    if (state.previewVisible) updateSignaturePreviewPosition();
-});
-
-signatureYInput.addEventListener('input', () => {
-    if (state.previewVisible) updateSignaturePreviewPosition();
-});
-
 // Drag & Drop de la signature
 signaturePreview.addEventListener('mousedown', startDrag);
 document.addEventListener('mousemove', drag);
 document.addEventListener('mouseup', stopDrag);
+
+// Support tactile pour le drag
+signaturePreview.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 1) {
+        const touch = e.touches[0];
+        startDrag({ clientX: touch.clientX, clientY: touch.clientY });
+    }
+});
+
+document.addEventListener('touchmove', (e) => {
+    if (isDragging && e.touches.length === 1) {
+        e.preventDefault();
+        const touch = e.touches[0];
+        drag({ clientX: touch.clientX, clientY: touch.clientY });
+    }
+});
+
+document.addEventListener('touchend', stopDrag);
 
 // Fonction pour contraindre la signature aux limites du PDF
 function constrainSignaturePosition() {
@@ -469,7 +557,7 @@ function constrainSignaturePosition() {
     let currentLeft = parseFloat(signaturePreview.style.left) || 0;
     let currentTop = parseFloat(signaturePreview.style.top) || 0;
 
-    // Calculer les dimensions effectives avec le scale
+    // Calculer les dimensions effectives
     const effectiveWidth = sigRect.width;
     const effectiveHeight = sigRect.height;
 
@@ -483,13 +571,6 @@ function constrainSignaturePosition() {
     // Appliquer les nouvelles positions
     signaturePreview.style.left = `${currentLeft}px`;
     signaturePreview.style.top = `${currentTop}px`;
-
-    // Mettre à jour les inputs de coordonnées PDF
-    const pdfX = Math.round((currentLeft / docRect.width) * 595);
-    const pdfY = Math.round(842 - ((currentTop + effectiveHeight) / docRect.height) * 842);
-
-    if (signatureXInput) signatureXInput.value = pdfX;
-    if (signatureYInput) signatureYInput.value = pdfY;
 }
 
 function startDrag(e) {
@@ -531,14 +612,6 @@ function drag(e) {
     // Mettre à jour la position visuelle
     signaturePreview.style.left = `${mouseX}px`;
     signaturePreview.style.top = `${mouseY}px`;
-
-    // Convertir en coordonnées PDF (A4: 595x842 points)
-    const pdfX = Math.round((mouseX / docRect.width) * 595);
-    const pdfY = Math.round(842 - ((mouseY + effectiveHeight) / docRect.height) * 842);
-
-    // Mettre à jour les inputs
-    if (signatureXInput) signatureXInput.value = pdfX;
-    if (signatureYInput) signatureYInput.value = pdfY;
 }
 
 function stopDrag() {
@@ -548,117 +621,18 @@ function stopDrag() {
     }
 }
 
-// ============================================
-// GESTES TACTILES - Pinch to Zoom et Rotation
-// ============================================
-
-let touchStartDistance = 0;
-let touchStartAngle = 0;
-let lastScale = 1;
-let lastRotation = 0;
-
-// Calculer la distance entre deux points tactiles
-function getDistance(touch1, touch2) {
-    const dx = touch2.clientX - touch1.clientX;
-    const dy = touch2.clientY - touch1.clientY;
-    return Math.sqrt(dx * dx + dy * dy);
-}
-
-// Calculer l'angle entre deux points tactiles
-function getAngle(touch1, touch2) {
-    const dx = touch2.clientX - touch1.clientX;
-    const dy = touch2.clientY - touch1.clientY;
-    return Math.atan2(dy, dx) * 180 / Math.PI;
-}
-
-// Gestion des gestes tactiles sur la signature
-signaturePreview.addEventListener('touchstart', (e) => {
-    if (e.touches.length === 2) {
-        e.preventDefault();
-        // Deux doigts : pinch to zoom et rotation
-        touchStartDistance = getDistance(e.touches[0], e.touches[1]);
-        touchStartAngle = getAngle(e.touches[0], e.touches[1]);
-        lastScale = state.signatureScale;
-        lastRotation = state.signatureRotation;
-    } else if (e.touches.length === 1) {
-        // Un doigt : drag (déjà géré plus haut)
-        const touch = e.touches[0];
-        startDrag({ clientX: touch.clientX, clientY: touch.clientY });
-    }
-});
-
-signaturePreview.addEventListener('touchmove', (e) => {
-    if (e.touches.length === 2) {
-        e.preventDefault();
-
-        // Calculer le nouveau zoom
-        const currentDistance = getDistance(e.touches[0], e.touches[1]);
-        const scaleChange = currentDistance / touchStartDistance;
-        state.signatureScale = Math.max(0.5, Math.min(3, lastScale * scaleChange));
-
-        // Calculer la nouvelle rotation
-        const currentAngle = getAngle(e.touches[0], e.touches[1]);
-        const angleDiff = currentAngle - touchStartAngle;
-        state.signatureRotation = lastRotation + angleDiff;
-
-        // Appliquer les transformations
-        applySignatureTransform();
-
-    } else if (e.touches.length === 1 && isDragging) {
-        // Un doigt : drag
-        e.preventDefault();
-        const touch = e.touches[0];
-        drag({ clientX: touch.clientX, clientY: touch.clientY });
-    }
-});
-
-signaturePreview.addEventListener('touchend', (e) => {
-    if (e.touches.length < 2) {
-        touchStartDistance = 0;
-        touchStartAngle = 0;
-    }
-    if (e.touches.length === 0) {
-        stopDrag();
-    }
-});
-
-// Appliquer les transformations CSS à la signature
-function applySignatureTransform() {
-    if (signaturePreview) {
-        const transform = `scale(${state.signatureScale}) rotate(${state.signatureRotation}deg)`;
-        signaturePreview.style.transform = transform;
-        signaturePreview.style.transformOrigin = 'center center';
-
-        // Contraindre aux limites après transformation
-        setTimeout(() => constrainSignaturePosition(), 10);
-    }
-}
-
-// Mettre à jour la position de la signature avec les transformations
+// Mettre à jour la position de la signature
 function updateSignaturePreviewPosition() {
     if (!signaturePreview || !signatureOverlay) return;
 
-    const x = parseInt(signatureXInput.value);
-    const y = parseInt(signatureYInput.value);
-
-    // Calculer la position relative au document preview
-    const docCanvas = documentPreview.querySelector('canvas');
-    if (!docCanvas) return;
-
-    const docRect = docCanvas.getBoundingClientRect();
-    const previewRect = documentPreview.getBoundingClientRect();
-
-    // Position relative dans le preview
-    const relativeX = (x / 595) * docCanvas.width;
-    const relativeY = docCanvas.height - (y / 842) * docCanvas.height;
-
-    signaturePreview.style.left = `${relativeX}px`;
-    signaturePreview.style.top = `${relativeY}px`;
     signaturePreview.style.width = `${currentSignatureWidth}px`;
     signaturePreview.style.height = 'auto';
 
-    // Appliquer les transformations (zoom et rotation)
-    applySignatureTransform();
+    // Position initiale au centre
+    if (!signaturePreview.style.left) {
+        signaturePreview.style.left = '50px';
+        signaturePreview.style.top = '50px';
+    }
 }
 
 // Générer le PDF avec signature
@@ -722,31 +696,88 @@ async function createSignedPDF() {
         }
     }
 
-    // Ajouter la signature à la première page
+    // Récupérer toutes les pages
     const pages = pdfDoc.getPages();
-    const firstPage = pages[0];
 
     // Convertir la signature en image PNG
     const signatureImageBytes = await fetch(state.signatureData).then(res => res.arrayBuffer());
     const signatureImage = await pdfDoc.embedPng(signatureImageBytes);
 
-    const signatureX = parseInt(document.getElementById('signature-x').value);
-    const signatureY = parseInt(document.getElementById('signature-y').value);
+    // Calculer la position de la signature depuis la prévisualisation
+    const docCanvas = documentPreview.querySelector('canvas');
+    const signatureLeft = parseFloat(signaturePreview.style.left) || 50;
+    const signatureTop = parseFloat(signaturePreview.style.top) || 50;
 
-    // Utiliser la taille actuelle (du slider) et l'échelle du geste tactile
-    const finalScale = currentSignatureWidth * state.signatureScale;
-    const signatureDims = signatureImage.scale(finalScale / signatureImage.width);
+    let signatureX = 50;
+    let signatureY = 700;
 
-    // Convertir la rotation en radians pour pdf-lib
-    const rotationRadians = (state.signatureRotation * Math.PI) / 180;
+    if (docCanvas) {
+        const docRect = docCanvas.getBoundingClientRect();
+        const sigRect = signaturePreview.getBoundingClientRect();
 
+        // Convertir en coordonnées PDF (A4: 595x842 points)
+        signatureX = Math.round((signatureLeft / docRect.width) * 595);
+        signatureY = Math.round(842 - ((signatureTop + sigRect.height) / docRect.height) * 842);
+    }
+
+    // Utiliser la taille actuelle (du slider)
+    const signatureDims = signatureImage.scale(currentSignatureWidth / signatureImage.width);
+
+    // Ajouter la signature sur la première page
+    const firstPage = pages[0];
     firstPage.drawImage(signatureImage, {
         x: signatureX,
         y: signatureY,
         width: signatureDims.width,
-        height: signatureDims.height,
-        rotate: { angle: rotationRadians, type: 'radians' }
+        height: signatureDims.height
     });
+
+    // Ajouter le paraphe sur toutes les pages si défini
+    if (state.parapheData) {
+        const parapheImageBytes = await fetch(state.parapheData).then(res => res.arrayBuffer());
+        const parapheImage = await pdfDoc.embedPng(parapheImageBytes);
+
+        const parapheSize = parseInt(document.getElementById('paraphe-size')?.value || 80);
+        const paraphePosition = document.getElementById('paraphe-position')?.value || 'bottom-right';
+        const parapheDims = parapheImage.scale(parapheSize / parapheImage.width);
+
+        // Calculer la position selon le choix
+        pages.forEach(page => {
+            let parapheX, parapheY;
+            const pageWidth = page.getWidth();
+            const pageHeight = page.getHeight();
+            const margin = 20;
+
+            switch (paraphePosition) {
+                case 'bottom-right':
+                    parapheX = pageWidth - parapheDims.width - margin;
+                    parapheY = margin;
+                    break;
+                case 'bottom-left':
+                    parapheX = margin;
+                    parapheY = margin;
+                    break;
+                case 'top-right':
+                    parapheX = pageWidth - parapheDims.width - margin;
+                    parapheY = pageHeight - parapheDims.height - margin;
+                    break;
+                case 'top-left':
+                    parapheX = margin;
+                    parapheY = pageHeight - parapheDims.height - margin;
+                    break;
+                default:
+                    parapheX = pageWidth - parapheDims.width - margin;
+                    parapheY = margin;
+            }
+
+            page.drawImage(parapheImage, {
+                x: parapheX,
+                y: parapheY,
+                width: parapheDims.width,
+                height: parapheDims.height
+            });
+        });
+    }
 
     return await pdfDoc.save();
 }

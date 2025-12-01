@@ -62,32 +62,36 @@
                 <p class="hint">Dessinez votre signature ci-dessus</p>
             </section>
 
-            <!-- Section 3: Positionnement de la signature -->
-            <section class="card" id="position-section" style="display: none;">
-                <h2>3. Positionner la signature</h2>
-                <p class="hint">💡 Glissez-déposez la signature sur le document ou utilisez les contrôles ci-dessous</p>
+            <!-- Section 3: Paraphe -->
+            <section class="card" id="paraphe-section" style="display: none;">
+                <h2>3. Créer votre paraphe (optionnel)</h2>
+                <p class="hint">Le paraphe sera appliqué sur toutes les pages du document</p>
+                <div class="signature-controls">
+                    <label for="paraphe-color">Couleur:</label>
+                    <input type="color" id="paraphe-color" value="#000000">
 
-                <div class="position-mode">
-                    <button class="btn btn-primary" id="toggle-preview-btn">
-                        👁️ Afficher/Masquer la signature sur le document
-                    </button>
+                    <label for="paraphe-width">Épaisseur:</label>
+                    <input type="range" id="paraphe-width" min="1" max="10" value="2">
+
+                    <button class="btn btn-secondary" id="clear-paraphe">🗑️ Effacer</button>
                 </div>
+                <canvas id="paraphe-canvas" width="400" height="150"></canvas>
+                <p class="hint">Dessinez votre paraphe ci-dessus</p>
 
-                <div class="position-controls">
+                <!-- Contrôle de taille et position du paraphe -->
+                <div class="paraphe-controls">
                     <label>
-                        Position X:
-                        <input type="number" id="signature-x" value="50" min="0" max="595" step="1">
-                        <span class="unit">px</span>
+                        📏 Taille: <span id="paraphe-size-value">80px</span>
+                        <input type="range" id="paraphe-size" min="30" max="150" value="80" step="5">
                     </label>
                     <label>
-                        Position Y:
-                        <input type="number" id="signature-y" value="700" min="0" max="842" step="1">
-                        <span class="unit">px</span>
-                    </label>
-                    <label>
-                        Largeur:
-                        <input type="range" id="signature-scale" value="150" min="50" max="300" step="5">
-                        <span class="value-display" id="scale-value">150px</span>
+                        📍 Position:
+                        <select id="paraphe-position">
+                            <option value="bottom-right">Bas droite</option>
+                            <option value="bottom-left">Bas gauche</option>
+                            <option value="top-right">Haut droite</option>
+                            <option value="top-left">Haut gauche</option>
+                        </select>
                     </label>
                 </div>
             </section>
