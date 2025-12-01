@@ -189,6 +189,13 @@ async function handleFileUpload(e) {
     if (sizeControl) {
         sizeControl.style.display = 'block';
     }
+
+    // Si une signature existe déjà, l'afficher sur le nouveau document
+    setTimeout(() => {
+        if (state.signatureData) {
+            showSignatureOnDocument();
+        }
+    }, 500);
 }
 
 // Charger et afficher un PDF
@@ -323,8 +330,20 @@ function showSignatureOnDocument() {
 
     if (state.signatureData && signaturePreview && signatureOverlay) {
         signaturePreview.src = state.signatureData;
-        signatureOverlay.style.display = 'block';
-        updateSignaturePreviewPosition();
+
+        // Attendre que l'image soit chargée avant d'afficher
+        signaturePreview.onload = () => {
+            signatureOverlay.style.display = 'block';
+            updateSignaturePreviewPosition();
+            console.log('✅ Signature affichée sur le document');
+        };
+
+        // Si l'image est déjà en cache, l'afficher immédiatement
+        if (signaturePreview.complete) {
+            signatureOverlay.style.display = 'block';
+            updateSignaturePreviewPosition();
+            console.log('✅ Signature affichée sur le document (cache)');
+        }
     }
 }
 
@@ -628,10 +647,22 @@ function updateSignaturePreviewPosition() {
     signaturePreview.style.width = `${currentSignatureWidth}px`;
     signaturePreview.style.height = 'auto';
 
-    // Position initiale au centre
-    if (!signaturePreview.style.left) {
-        signaturePreview.style.left = '50px';
-        signaturePreview.style.top = '50px';
+    // Position initiale au centre du document
+    if (!signaturePreview.style.left || signaturePreview.style.left === '0px') {
+        const docCanvas = documentPreview.querySelector('canvas');
+        if (docCanvas) {
+            const docRect = docCanvas.getBoundingClientRect();
+            // Centrer la signature
+            const centerX = (docRect.width - currentSignatureWidth) / 2;
+            const centerY = docRect.height / 2;
+
+            signaturePreview.style.left = `${Math.max(10, centerX)}px`;
+            signaturePreview.style.top = `${Math.max(10, centerY)}px`;
+        } else {
+            // Fallback si pas de canvas
+            signaturePreview.style.left = '50px';
+            signaturePreview.style.top = '50px';
+        }
     }
 }
 
