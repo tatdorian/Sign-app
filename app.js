@@ -6,7 +6,8 @@ const state = {
     signatureData: null,
     isDrawing: false,
     pdfDoc: null,
-    originalPdfBytes: null
+    originalPdfBytes: null,
+    previewVisible: false
 };
 
 // Éléments DOM
@@ -43,6 +44,15 @@ async function handleFileUpload(e) {
     state.uploadedFile = file;
     fileInfo.textContent = `Fichier sélectionné: ${file.name}`;
 
+    // Réinitialiser la prévisualisation de la signature
+    state.previewVisible = false;
+    const signatureOverlay = document.getElementById('signature-overlay');
+    if (signatureOverlay) {
+        signatureOverlay.style.display = 'none';
+    }
+
+    // Sauvegarder l'overlay avant de vider le preview
+    const overlayHTML = signatureOverlay ? signatureOverlay.outerHTML : '';
     documentPreview.innerHTML = '';
 
     if (file.type === 'application/pdf') {
@@ -51,6 +61,11 @@ async function handleFileUpload(e) {
     } else if (file.type.startsWith('image/')) {
         state.uploadedFileType = 'image';
         loadImage(file);
+    }
+
+    // Remettre l'overlay après avoir chargé le document
+    if (overlayHTML) {
+        documentPreview.insertAdjacentHTML('beforeend', overlayHTML);
     }
 
     // Afficher les sections suivantes
@@ -172,6 +187,20 @@ function stopDrawing() {
     if (state.isDrawing) {
         state.isDrawing = false;
         state.signatureData = signatureCanvas.toDataURL();
+
+        // Mettre à jour la prévisualisation si visible
+        updateSignaturePreview();
+    }
+}
+
+// Fonction pour mettre à jour la prévisualisation de la signature
+function updateSignaturePreview() {
+    const signaturePreview = document.getElementById('signature-preview');
+    const signatureOverlay = document.getElementById('signature-overlay');
+
+    if (state.signatureData && signaturePreview && state.previewVisible) {
+        signaturePreview.src = state.signatureData;
+        updateSignaturePreviewPosition();
     }
 }
 
@@ -179,7 +208,160 @@ function stopDrawing() {
 clearBtn.addEventListener('click', () => {
     ctx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
     state.signatureData = null;
+    // Masquer la prévisualisation
+    const signatureOverlay = document.getElementById('signature-overlay');
+    if (signatureOverlay) {
+        signatureOverlay.style.display = 'none';
+    }
 });
+
+// ============================================
+// DRAG & DROP - Positionnement de la signature
+// ============================================
+
+const signatureOverlay = document.getElementById('signature-overlay');
+const signaturePreview = document.getElementById('signature-preview');
+const togglePreviewBtn = document.getElementById('toggle-preview-btn');
+const signatureXInput = document.getElementById('signature-x');
+const signatureYInput = document.getElementById('signature-y');
+const signatureScaleInput = document.getElementById('signature-scale');
+const scaleValueDisplay = document.getElementById('scale-value');
+
+let isDragging = false;
+let dragStartX = 0;
+let dragStartY = 0;
+
+// Toggle affichage de la signature sur le document
+if (togglePreviewBtn) {
+    togglePreviewBtn.addEventListener('click', () => {
+        if (!state.signatureData) {
+            alert('Veuillez créer une signature d\'abord!');
+            return;
+        }
+
+        state.previewVisible = !state.previewVisible;
+
+        if (state.previewVisible) {
+            // Afficher la signature
+            signaturePreview.src = state.signatureData;
+            updateSignaturePreviewPosition();
+            signatureOverlay.style.display = 'block';
+            togglePreviewBtn.textContent = '👁️ Masquer la signature';
+        } else {
+            // Masquer la signature
+            signatureOverlay.style.display = 'none';
+            togglePreviewBtn.textContent = '👁️ Afficher la signature';
+        }
+    });
+}
+
+// Mettre à jour la position et taille de la signature preview
+function updateSignaturePreviewPosition() {
+    if (!signaturePreview || !signatureOverlay) return;
+
+    const x = parseInt(signatureXInput.value);
+    const y = parseInt(signatureYInput.value);
+    const width = parseInt(signatureScaleInput.value);
+
+    // Calculer la position relative au document preview
+    const docCanvas = documentPreview.querySelector('canvas');
+    if (!docCanvas) return;
+
+    const docRect = docCanvas.getBoundingClientRect();
+    const previewRect = documentPreview.getBoundingClientRect();
+
+    // Position relative dans le preview
+    const relativeX = (x / 595) * docCanvas.width;
+    const relativeY = docCanvas.height - (y / 842) * docCanvas.height;
+
+    signaturePreview.style.left = `${relativeX}px`;
+    signaturePreview.style.top = `${relativeY}px`;
+    signaturePreview.style.width = `${width}px`;
+    signaturePreview.style.height = 'auto';
+}
+
+// Mettre à jour l'affichage de la valeur du scale
+signatureScaleInput.addEventListener('input', (e) => {
+    scaleValueDisplay.textContent = `${e.target.value}px`;
+    if (state.previewVisible) {
+        updateSignaturePreviewPosition();
+    }
+});
+
+// Mettre à jour la position quand les inputs changent
+signatureXInput.addEventListener('input', () => {
+    if (state.previewVisible) updateSignaturePreviewPosition();
+});
+
+signatureYInput.addEventListener('input', () => {
+    if (state.previewVisible) updateSignaturePreviewPosition();
+});
+
+// Drag & Drop de la signature
+signaturePreview.addEventListener('mousedown', startDrag);
+document.addEventListener('mousemove', drag);
+document.addEventListener('mouseup', stopDrag);
+
+// Support tactile
+signaturePreview.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    startDrag({ clientX: touch.clientX, clientY: touch.clientY });
+});
+
+document.addEventListener('touchmove', (e) => {
+    if (!isDragging) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    drag({ clientX: touch.clientX, clientY: touch.clientY });
+});
+
+document.addEventListener('touchend', stopDrag);
+
+function startDrag(e) {
+    isDragging = true;
+    const rect = signaturePreview.getBoundingClientRect();
+    dragStartX = e.clientX - rect.left;
+    dragStartY = e.clientY - rect.top;
+    signaturePreview.style.cursor = 'grabbing';
+}
+
+function drag(e) {
+    if (!isDragging) return;
+
+    const docCanvas = documentPreview.querySelector('canvas');
+    if (!docCanvas) return;
+
+    const docRect = docCanvas.getBoundingClientRect();
+    const previewRect = documentPreview.getBoundingClientRect();
+
+    // Position de la souris relative au document
+    let mouseX = e.clientX - docRect.left - dragStartX;
+    let mouseY = e.clientY - docRect.top - dragStartY;
+
+    // Limiter aux bords du document
+    mouseX = Math.max(0, Math.min(mouseX, docRect.width - signaturePreview.offsetWidth));
+    mouseY = Math.max(0, Math.min(mouseY, docRect.height - signaturePreview.offsetHeight));
+
+    // Mettre à jour la position visuelle
+    signaturePreview.style.left = `${mouseX}px`;
+    signaturePreview.style.top = `${mouseY}px`;
+
+    // Convertir en coordonnées PDF (A4: 595x842 points)
+    const pdfX = Math.round((mouseX / docRect.width) * 595);
+    const pdfY = Math.round(842 - ((mouseY + signaturePreview.offsetHeight) / docRect.height) * 842);
+
+    // Mettre à jour les inputs
+    signatureXInput.value = pdfX;
+    signatureYInput.value = pdfY;
+}
+
+function stopDrag() {
+    if (isDragging) {
+        isDragging = false;
+        signaturePreview.style.cursor = 'move';
+    }
+}
 
 // Générer le PDF avec signature
 downloadBtn.addEventListener('click', generateAndDownloadPDF);
