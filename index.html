@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Application de Signature de Documents</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📝 Signature de Documents</h1>
+            <p>Téléchargez un document, ajoutez votre signature et envoyez-le par email ou téléchargez-le en PDF</p>
+        </header>
+
+        <main>
+            <!-- Section 1: Upload de document -->
+            <section class="card" id="upload-section">
+                <h2>1. Télécharger un document</h2>
+                <div class="upload-area">
+                    <input type="file" id="file-input" accept=".pdf,image/*" hidden>
+                    <button class="btn btn-primary" onclick="document.getElementById('file-input').click()">
+                        📁 Choisir un fichier
+                    </button>
+                    <p class="file-info" id="file-info">Aucun fichier sélectionné</p>
+                </div>
+                <div id="document-preview" class="document-preview"></div>
+            </section>
+
+            <!-- Section 2: Signature -->
+            <section class="card" id="signature-section" style="display: none;">
+                <h2>2. Créer votre signature</h2>
+                <div class="signature-controls">
+                    <label for="signature-color">Couleur:</label>
+                    <input type="color" id="signature-color" value="#000000">
+
+                    <label for="signature-width">Épaisseur:</label>
+                    <input type="range" id="signature-width" min="1" max="10" value="3">
+
+                    <button class="btn btn-secondary" id="clear-signature">🗑️ Effacer</button>
+                </div>
+                <canvas id="signature-canvas" width="600" height="200"></canvas>
+                <p class="hint">Dessinez votre signature ci-dessus</p>
+            </section>
+
+            <!-- Section 3: Positionnement de la signature -->
+            <section class="card" id="position-section" style="display: none;">
+                <h2>3. Positionner la signature</h2>
+                <div class="position-controls">
+                    <label>
+                        Position X:
+                        <input type="number" id="signature-x" value="50" min="0" max="500">
+                    </label>
+                    <label>
+                        Position Y:
+                        <input type="number" id="signature-y" value="700" min="0" max="800">
+                    </label>
+                    <label>
+                        Largeur:
+                        <input type="number" id="signature-scale" value="150" min="50" max="300">
+                    </label>
+                </div>
+            </section>
+
+            <!-- Section 4: Actions -->
+            <section class="card" id="actions-section" style="display: none;">
+                <h2>4. Envoyer ou télécharger</h2>
+                <div class="actions">
+                    <button class="btn btn-success" id="download-btn">
+                        ⬇️ Télécharger le PDF
+                    </button>
+                    <button class="btn btn-info" id="email-btn">
+                        📧 Envoyer par Email
+                    </button>
+                </div>
+
+                <!-- Formulaire d'email (caché initialement) -->
+                <div id="email-form" class="email-form" style="display: none;">
+                    <h3>Envoyer par email</h3>
+                    <input type="email" id="recipient-email" placeholder="Email du destinataire" required>
+                    <input type="text" id="email-subject" placeholder="Sujet" value="Document signé">
+                    <textarea id="email-message" placeholder="Message (optionnel)" rows="4"></textarea>
+                    <div class="form-actions">
+                        <button class="btn btn-primary" id="send-email-btn">Envoyer</button>
+                        <button class="btn btn-secondary" id="cancel-email-btn">Annuler</button>
+                    </div>
+                    <div id="email-status" class="status-message"></div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>© 2025 Application de Signature de Documents</p>
+        </footer>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="supabase-client.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
