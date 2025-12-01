@@ -146,9 +146,12 @@ async function handleFileUpload(e) {
 // Charger et afficher un PDF
 async function loadPDF(file) {
     const arrayBuffer = await file.arrayBuffer();
-    state.originalPdfBytes = arrayBuffer;
 
-    // Utiliser PDF.js pour l'affichage
+    // Créer une copie de l'ArrayBuffer pour éviter le détachement
+    const arrayBufferCopy = arrayBuffer.slice(0);
+    state.originalPdfBytes = arrayBufferCopy;
+
+    // Utiliser PDF.js pour l'affichage (avec l'original)
     const loadingTask = pdfjsLib.getDocument(arrayBuffer);
     const pdf = await loadingTask.promise;
 
