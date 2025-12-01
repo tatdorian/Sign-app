@@ -24,7 +24,13 @@
                     </button>
                     <p class="file-info" id="file-info">Aucun fichier sélectionné</p>
                 </div>
-                <div id="document-preview" class="document-preview"></div>
+                <div id="document-preview" class="document-preview">
+                    <!-- Zone interactive pour positionner la signature -->
+                    <div id="signature-overlay" class="signature-overlay" style="display: none;">
+                        <img id="signature-preview" class="signature-draggable" alt="Signature">
+                        <div class="signature-hint">🖱️ Glissez pour positionner</div>
+                    </div>
+                </div>
             </section>
 
             <!-- Section 2: Signature -->
@@ -46,18 +52,29 @@
             <!-- Section 3: Positionnement de la signature -->
             <section class="card" id="position-section" style="display: none;">
                 <h2>3. Positionner la signature</h2>
+                <p class="hint">💡 Glissez-déposez la signature sur le document ou utilisez les contrôles ci-dessous</p>
+
+                <div class="position-mode">
+                    <button class="btn btn-primary" id="toggle-preview-btn">
+                        👁️ Afficher/Masquer la signature sur le document
+                    </button>
+                </div>
+
                 <div class="position-controls">
                     <label>
                         Position X:
-                        <input type="number" id="signature-x" value="50" min="0" max="500">
+                        <input type="number" id="signature-x" value="50" min="0" max="595" step="1">
+                        <span class="unit">px</span>
                     </label>
                     <label>
                         Position Y:
-                        <input type="number" id="signature-y" value="700" min="0" max="800">
+                        <input type="number" id="signature-y" value="700" min="0" max="842" step="1">
+                        <span class="unit">px</span>
                     </label>
                     <label>
                         Largeur:
-                        <input type="number" id="signature-scale" value="150" min="50" max="300">
+                        <input type="range" id="signature-scale" value="150" min="50" max="300" step="5">
+                        <span class="value-display" id="scale-value">150px</span>
                     </label>
                 </div>
             </section>
