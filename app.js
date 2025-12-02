@@ -177,6 +177,9 @@ async function handleFileUpload(e) {
             toggleBtn.textContent = '👁️ Afficher la signature sur le document';
         }
 
+        // Supprimer les clones de paraphe
+        removeParapheClones();
+
         // Vider seulement le contenu du document (garder les overlays)
         const children = Array.from(documentPreview.children);
         children.forEach(child => {
@@ -579,6 +582,8 @@ if (clearParapheBtn) {
         if (parapheOverlay) {
             parapheOverlay.style.display = 'none';
         }
+        // Supprimer tous les clones
+        removeParapheClones();
     });
 }
 
@@ -598,6 +603,8 @@ if (parapheSizeSlider && parapheSizeValue) {
         if (paraphePreview && parapheOverlay.style.display !== 'none') {
             paraphePreview.style.width = `${currentParapheSize}px`;
             constrainParaphePosition();
+            // Recréer les clones avec la nouvelle taille
+            createParapheClones();
         }
     });
 }
@@ -614,6 +621,7 @@ function showParapheOnDocument() {
         paraphePreview.onload = () => {
             parapheOverlay.style.display = 'block';
             updateParaphePreviewPosition();
+            createParapheClones();
             console.log('✅ Paraphe affiché sur le document');
         };
 
@@ -621,9 +629,92 @@ function showParapheOnDocument() {
         if (paraphePreview.complete) {
             parapheOverlay.style.display = 'block';
             updateParaphePreviewPosition();
+            createParapheClones();
             console.log('✅ Paraphe affiché sur le document (cache)');
         }
     }
+}
+
+// Créer des clones du paraphe sur toutes les pages
+function createParapheClones() {
+    // Supprimer les anciens clones
+    removeParapheClones();
+
+    const paraphePreview = document.getElementById('paraphe-preview');
+    const pagesContainer = document.getElementById('pdf-pages-container');
+
+    if (!paraphePreview || !pagesContainer || !state.parapheData) return;
+
+    const pageContainers = pagesContainer.querySelectorAll('.pdf-page-container');
+    const parapheRect = paraphePreview.getBoundingClientRect();
+    const containerRect = documentPreview.getBoundingClientRect();
+    const parapheOverlay = document.getElementById('paraphe-overlay');
+
+    // Position du paraphe principal
+    const mainLeft = parseFloat(paraphePreview.style.left) || 0;
+    const mainTop = parseFloat(paraphePreview.style.top) || 0;
+
+    // Pour chaque page sauf celle où est le paraphe principal
+    const mainPageNum = detectParaphePage();
+
+    pageContainers.forEach((pageContainer, index) => {
+        const pageNum = parseInt(pageContainer.dataset.pageNumber);
+
+        // Ne pas créer de clone sur la page du paraphe principal
+        if (pageNum === mainPageNum) return;
+
+        // Créer un clone du paraphe
+        const clone = document.createElement('img');
+        clone.src = state.parapheData;
+        clone.className = 'paraphe-clone';
+        clone.style.width = `${currentParapheSize}px`;
+        clone.style.height = 'auto';
+        clone.style.position = 'absolute';
+        clone.style.pointerEvents = 'none';
+        clone.style.opacity = '0.8';
+        clone.style.border = '2px dashed #764ba2';
+        clone.style.borderRadius = '5px';
+        clone.style.padding = '5px';
+        clone.style.background = 'rgba(255, 255, 255, 0.9)';
+        clone.style.boxShadow = '0 4px 12px rgba(118, 75, 162, 0.3)';
+
+        // Calculer la position relative pour ce clone
+        const pageCanvas = pageContainer.querySelector('.pdf-page-canvas');
+        if (pageCanvas) {
+            const pageRect = pageCanvas.getBoundingClientRect();
+            const mainPageContainer = pagesContainer.querySelector(`.pdf-page-container[data-page-number="${mainPageNum}"]`);
+            const mainCanvas = mainPageContainer ? mainPageContainer.querySelector('.pdf-page-canvas') : null;
+
+            if (mainCanvas) {
+                const mainCanvasRect = mainCanvas.getBoundingClientRect();
+
+                // Position relative du paraphe sur sa page
+                const relativeLeft = mainLeft - (mainCanvasRect.left - containerRect.left);
+                const relativeTop = mainTop - (mainCanvasRect.top - containerRect.top);
+
+                // Appliquer la même position relative sur cette page
+                const cloneLeft = (pageRect.left - containerRect.left) + relativeLeft;
+                const cloneTop = (pageRect.top - containerRect.top) + relativeTop;
+
+                clone.style.left = `${cloneLeft}px`;
+                clone.style.top = `${cloneTop}px`;
+                clone.style.zIndex = '8';
+            }
+        }
+
+        parapheOverlay.appendChild(clone);
+    });
+
+    console.log(`✅ ${pageContainers.length - 1} clones de paraphe créés`);
+}
+
+// Supprimer tous les clones de paraphe
+function removeParapheClones() {
+    const parapheOverlay = document.getElementById('paraphe-overlay');
+    if (!parapheOverlay) return;
+
+    const clones = parapheOverlay.querySelectorAll('.paraphe-clone');
+    clones.forEach(clone => clone.remove());
 }
 
 // Mettre à jour la position du paraphe
@@ -846,6 +937,9 @@ function stopDragParaphe() {
 
             // Détecter sur quelle page le paraphe a été placé
             detectParaphePage();
+
+            // Recréer les clones avec la nouvelle position
+            createParapheClones();
         }
     }
 }
