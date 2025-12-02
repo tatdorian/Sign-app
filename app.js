@@ -12,7 +12,9 @@ const state = {
     signatureScale: 1,
     totalPages: 1,
     currentPage: 1,
-    signaturePage: 1
+    signaturePage: 1,
+    paraphePosition: { x: 50, y: 50 }, // Position manuelle du paraphe
+    paraphePage: 1 // Page sur laquelle le paraphe est placé
 };
 
 // Éléments DOM
@@ -197,6 +199,9 @@ async function handleFileUpload(e) {
     setTimeout(() => {
         if (state.signatureData) {
             showSignatureOnDocument();
+        }
+        if (state.parapheData) {
+            showParapheOnDocument();
         }
     }, 500);
 }
@@ -485,6 +490,9 @@ function stopDrawingParaphe() {
     if (state.isDrawingParaphe) {
         state.isDrawingParaphe = false;
         state.parapheData = parapheCanvas.toDataURL();
+
+        // Afficher automatiquement le paraphe sur le document
+        showParapheOnDocument();
     }
 }
 
@@ -493,17 +501,266 @@ if (clearParapheBtn) {
     clearParapheBtn.addEventListener('click', () => {
         ctxParaphe.clearRect(0, 0, parapheCanvas.width, parapheCanvas.height);
         state.parapheData = null;
+        // Masquer le paraphe du document
+        const parapheOverlay = document.getElementById('paraphe-overlay');
+        if (parapheOverlay) {
+            parapheOverlay.style.display = 'none';
+        }
     });
 }
 
 // Gestion du slider de taille du paraphe
 const parapheSizeSlider = document.getElementById('paraphe-size');
 const parapheSizeValue = document.getElementById('paraphe-size-value');
+let currentParapheSize = 80; // Taille par défaut
 
 if (parapheSizeSlider && parapheSizeValue) {
     parapheSizeSlider.addEventListener('input', (e) => {
-        parapheSizeValue.textContent = `${e.target.value}px`;
+        currentParapheSize = parseInt(e.target.value);
+        parapheSizeValue.textContent = `${currentParapheSize}px`;
+
+        // Mettre à jour la taille du paraphe s'il est affiché
+        const paraphePreview = document.getElementById('paraphe-preview');
+        const parapheOverlay = document.getElementById('paraphe-overlay');
+        if (paraphePreview && parapheOverlay.style.display !== 'none') {
+            paraphePreview.style.width = `${currentParapheSize}px`;
+            constrainParaphePosition();
+        }
     });
+}
+
+// Afficher automatiquement le paraphe sur le document
+function showParapheOnDocument() {
+    const paraphePreview = document.getElementById('paraphe-preview');
+    const parapheOverlay = document.getElementById('paraphe-overlay');
+
+    if (state.parapheData && paraphePreview && parapheOverlay) {
+        paraphePreview.src = state.parapheData;
+
+        // Attendre que l'image soit chargée avant d'afficher
+        paraphePreview.onload = () => {
+            parapheOverlay.style.display = 'block';
+            updateParaphePreviewPosition();
+            console.log('✅ Paraphe affiché sur le document');
+        };
+
+        // Si l'image est déjà en cache, l'afficher immédiatement
+        if (paraphePreview.complete) {
+            parapheOverlay.style.display = 'block';
+            updateParaphePreviewPosition();
+            console.log('✅ Paraphe affiché sur le document (cache)');
+        }
+    }
+}
+
+// Mettre à jour la position du paraphe
+function updateParaphePreviewPosition() {
+    const paraphePreview = document.getElementById('paraphe-preview');
+    const parapheOverlay = document.getElementById('paraphe-overlay');
+
+    if (!paraphePreview || !parapheOverlay) {
+        console.log('❌ paraphePreview ou parapheOverlay non disponible');
+        return;
+    }
+
+    paraphePreview.style.width = `${currentParapheSize}px`;
+    paraphePreview.style.height = 'auto';
+
+    // Position initiale dans le coin bas droit de la première page
+    if (!paraphePreview.style.left || paraphePreview.style.left === '0px') {
+        const pagesContainer = document.getElementById('pdf-pages-container');
+        const firstPageContainer = pagesContainer ? pagesContainer.querySelector('.pdf-page-container') : null;
+        const firstCanvas = firstPageContainer ? firstPageContainer.querySelector('.pdf-page-canvas') : documentPreview.querySelector('canvas');
+
+        if (firstCanvas) {
+            const canvasWidth = firstCanvas.width;
+            const canvasHeight = firstCanvas.height;
+
+            // Positionner dans le coin bas droit (avec marge)
+            const posX = canvasWidth - currentParapheSize - 20;
+            const posY = canvasHeight - currentParapheSize - 20;
+
+            paraphePreview.style.left = `${Math.max(10, posX)}px`;
+            paraphePreview.style.top = `${Math.max(10, posY)}px`;
+
+            // Sauvegarder la position
+            state.paraphePosition = { x: posX, y: posY };
+
+            console.log(`✅ Paraphe positionné à (${posX}, ${posY})`);
+
+            // Définir la page du paraphe
+            state.paraphePage = 1;
+        } else {
+            // Fallback si pas de canvas
+            paraphePreview.style.left = '50px';
+            paraphePreview.style.top = '50px';
+            state.paraphePosition = { x: 50, y: 50 };
+            console.log('⚠️ Utilisation de la position fallback pour paraphe');
+        }
+    }
+
+    // S'assurer que le paraphe est visible
+    paraphePreview.style.position = 'absolute';
+    paraphePreview.style.display = 'block';
+    console.log(`✅ Paraphe visible: display=${paraphePreview.style.display}, position=${paraphePreview.style.position}`);
+}
+
+// ============================================
+// DRAG & DROP - Positionnement du paraphe
+// ============================================
+
+const paraphePreview = document.getElementById('paraphe-preview');
+let isDraggingParaphe = false;
+let dragStartXParaphe = 0;
+let dragStartYParaphe = 0;
+
+// Drag & Drop du paraphe
+if (paraphePreview) {
+    paraphePreview.addEventListener('mousedown', startDragParaphe);
+
+    // Support tactile pour le drag
+    paraphePreview.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 1) {
+            const touch = e.touches[0];
+            startDragParaphe({ clientX: touch.clientX, clientY: touch.clientY });
+        }
+    });
+}
+
+document.addEventListener('mousemove', dragParaphe);
+document.addEventListener('mouseup', stopDragParaphe);
+
+document.addEventListener('touchmove', (e) => {
+    if (isDraggingParaphe && e.touches.length === 1) {
+        e.preventDefault();
+        const touch = e.touches[0];
+        dragParaphe({ clientX: touch.clientX, clientY: touch.clientY });
+    }
+});
+
+document.addEventListener('touchend', stopDragParaphe);
+
+// Fonction pour contraindre le paraphe aux limites du PDF
+function constrainParaphePosition() {
+    const paraphePreview = document.getElementById('paraphe-preview');
+    if (!paraphePreview || !documentPreview) return;
+
+    const docCanvas = documentPreview.querySelector('canvas');
+    if (!docCanvas) return;
+
+    const docRect = docCanvas.getBoundingClientRect();
+    const parapheRect = paraphePreview.getBoundingClientRect();
+
+    // Récupérer la position actuelle
+    let currentLeft = parseFloat(paraphePreview.style.left) || 0;
+    let currentTop = parseFloat(paraphePreview.style.top) || 0;
+
+    // Calculer les dimensions effectives
+    const effectiveWidth = parapheRect.width;
+    const effectiveHeight = parapheRect.height;
+
+    // Contraindre aux limites
+    const maxX = docRect.width - effectiveWidth;
+    const maxY = docRect.height - effectiveHeight;
+
+    currentLeft = Math.max(0, Math.min(currentLeft, maxX));
+    currentTop = Math.max(0, Math.min(currentTop, maxY));
+
+    // Appliquer les nouvelles positions
+    paraphePreview.style.left = `${currentLeft}px`;
+    paraphePreview.style.top = `${currentTop}px`;
+}
+
+function startDragParaphe(e) {
+    const paraphePreview = document.getElementById('paraphe-preview');
+    if (!paraphePreview) return;
+
+    isDraggingParaphe = true;
+    const rect = paraphePreview.getBoundingClientRect();
+    const docCanvas = documentPreview.querySelector('canvas');
+    if (docCanvas) {
+        dragStartXParaphe = e.clientX - rect.left;
+        dragStartYParaphe = e.clientY - rect.top;
+    }
+    paraphePreview.style.cursor = 'grabbing';
+}
+
+function dragParaphe(e) {
+    if (!isDraggingParaphe) return;
+
+    const paraphePreview = document.getElementById('paraphe-preview');
+    if (!paraphePreview) return;
+
+    const docCanvas = documentPreview.querySelector('canvas');
+    if (!docCanvas) return;
+
+    const docRect = docCanvas.getBoundingClientRect();
+
+    // Position de la souris relative au document
+    let mouseX = e.clientX - docRect.left - dragStartXParaphe;
+    let mouseY = e.clientY - docRect.top - dragStartYParaphe;
+
+    // Calculer les dimensions effectives du paraphe
+    const parapheRect = paraphePreview.getBoundingClientRect();
+    const effectiveWidth = parapheRect.width;
+    const effectiveHeight = parapheRect.height;
+
+    // Limiter aux bords du document
+    const maxX = docRect.width - effectiveWidth;
+    const maxY = docRect.height - effectiveHeight;
+
+    mouseX = Math.max(0, Math.min(mouseX, maxX));
+    mouseY = Math.max(0, Math.min(mouseY, maxY));
+
+    // Mettre à jour la position visuelle
+    paraphePreview.style.left = `${mouseX}px`;
+    paraphePreview.style.top = `${mouseY}px`;
+
+    // Sauvegarder la position
+    state.paraphePosition = { x: mouseX, y: mouseY };
+}
+
+function stopDragParaphe() {
+    if (isDraggingParaphe) {
+        const paraphePreview = document.getElementById('paraphe-preview');
+        if (paraphePreview) {
+            isDraggingParaphe = false;
+            paraphePreview.style.cursor = 'move';
+
+            // Détecter sur quelle page le paraphe a été placé
+            detectParaphePage();
+        }
+    }
+}
+
+// Détecter sur quelle page le paraphe est placé
+function detectParaphePage() {
+    const paraphePreview = document.getElementById('paraphe-preview');
+    const parapheOverlay = document.getElementById('paraphe-overlay');
+
+    if (!paraphePreview || !parapheOverlay) return 1;
+
+    const parapheRect = paraphePreview.getBoundingClientRect();
+    const parapheCenterY = parapheRect.top + parapheRect.height / 2;
+
+    const pagesContainer = document.getElementById('pdf-pages-container');
+    if (!pagesContainer) return 1;
+
+    const pageContainers = pagesContainer.querySelectorAll('.pdf-page-container');
+
+    for (let i = 0; i < pageContainers.length; i++) {
+        const pageContainer = pageContainers[i];
+        const pageRect = pageContainer.getBoundingClientRect();
+
+        // Vérifier si le centre du paraphe est dans cette page
+        if (parapheCenterY >= pageRect.top && parapheCenterY <= pageRect.bottom) {
+            state.paraphePage = parseInt(pageContainer.dataset.pageNumber);
+            console.log(`✍️ Paraphe sur la page ${state.paraphePage}`);
+            return state.paraphePage;
+        }
+    }
+
+    return 1;
 }
 
 // ============================================
@@ -691,7 +948,10 @@ function stopDrag() {
 
 // Mettre à jour la position de la signature
 function updateSignaturePreviewPosition() {
-    if (!signaturePreview || !signatureOverlay) return;
+    if (!signaturePreview || !signatureOverlay) {
+        console.log('❌ signaturePreview ou signatureOverlay non disponible');
+        return;
+    }
 
     signaturePreview.style.width = `${currentSignatureWidth}px`;
     signaturePreview.style.height = 'auto';
@@ -703,19 +963,18 @@ function updateSignaturePreviewPosition() {
         const firstCanvas = firstPageContainer ? firstPageContainer.querySelector('.pdf-page-canvas') : documentPreview.querySelector('canvas');
 
         if (firstCanvas) {
-            const canvasRect = firstCanvas.getBoundingClientRect();
-            const containerRect = documentPreview.getBoundingClientRect();
+            // Utiliser la position relative à signatureOverlay, pas getBoundingClientRect()
+            const canvasWidth = firstCanvas.width;
+            const canvasHeight = firstCanvas.height;
 
-            // Calculer la position relative au conteneur documentPreview
-            const relativeTop = canvasRect.top - containerRect.top;
-            const relativeLeft = canvasRect.left - containerRect.left;
-
-            // Centrer la signature sur la première page
-            const centerX = relativeLeft + (canvasRect.width - currentSignatureWidth) / 2;
-            const centerY = relativeTop + canvasRect.height / 2;
+            // Centrer la signature sur la première page (coordonnées relatives)
+            const centerX = (canvasWidth - currentSignatureWidth) / 2;
+            const centerY = canvasHeight / 2;
 
             signaturePreview.style.left = `${Math.max(10, centerX)}px`;
             signaturePreview.style.top = `${Math.max(10, centerY)}px`;
+
+            console.log(`✅ Signature positionnée à (${centerX}, ${centerY})`);
 
             // Définir la page de signature
             state.signaturePage = 1;
@@ -723,8 +982,14 @@ function updateSignaturePreviewPosition() {
             // Fallback si pas de canvas
             signaturePreview.style.left = '50px';
             signaturePreview.style.top = '50px';
+            console.log('⚠️ Utilisation de la position fallback');
         }
     }
+
+    // S'assurer que la signature est visible
+    signaturePreview.style.position = 'absolute';
+    signaturePreview.style.display = 'block';
+    console.log(`✅ Signature visible: display=${signaturePreview.style.display}, position=${signaturePreview.style.position}`);
 }
 
 // Détecter sur quelle page la signature est placée
@@ -868,39 +1133,39 @@ async function createSignedPDF() {
         const parapheImageBytes = await fetch(state.parapheData).then(res => res.arrayBuffer());
         const parapheImage = await pdfDoc.embedPng(parapheImageBytes);
 
-        const parapheSize = parseInt(document.getElementById('paraphe-size')?.value || 80);
-        const paraphePosition = document.getElementById('paraphe-position')?.value || 'bottom-right';
-        const parapheDims = parapheImage.scale(parapheSize / parapheImage.width);
+        // Récupérer la position du paraphe depuis la page où il a été placé
+        const paraphePreview = document.getElementById('paraphe-preview');
+        const parapheLeft = parseFloat(paraphePreview?.style.left || 50);
+        const parapheTop = parseFloat(paraphePreview?.style.top || 50);
 
-        // Calculer la position selon le choix
-        pages.forEach(page => {
-            let parapheX, parapheY;
-            const pageWidth = page.getWidth();
-            const pageHeight = page.getHeight();
-            const margin = 15;
+        // Détecter la page sur laquelle le paraphe a été placé
+        const paraphePageNum = detectParaphePage();
+        const paraphePageContainer = document.querySelector(`.pdf-page-container[data-page-number="${paraphePageNum}"]`);
+        const parapheCanvas = paraphePageContainer ? paraphePageContainer.querySelector('.pdf-page-canvas') : documentPreview.querySelector('canvas');
 
-            switch (paraphePosition) {
-                case 'bottom-right':
-                    parapheX = pageWidth - parapheDims.width - margin;
-                    parapheY = margin;
-                    break;
-                case 'bottom-left':
-                    parapheX = margin;
-                    parapheY = margin;
-                    break;
-                case 'top-right':
-                    parapheX = pageWidth - parapheDims.width - margin;
-                    parapheY = pageHeight - parapheDims.height - margin;
-                    break;
-                case 'top-left':
-                    parapheX = margin;
-                    parapheY = pageHeight - parapheDims.height - margin;
-                    break;
-                default:
-                    parapheX = pageWidth - parapheDims.width - margin;
-                    parapheY = margin;
-            }
+        let parapheX = 50;
+        let parapheY = 50;
 
+        if (parapheCanvas) {
+            const canvasRect = parapheCanvas.getBoundingClientRect();
+            const containerRect = documentPreview.getBoundingClientRect();
+            const parapheRect = paraphePreview.getBoundingClientRect();
+
+            // Position du paraphe relative au canvas de la page
+            const relativeLeft = parapheLeft - (canvasRect.left - containerRect.left);
+            const relativeTop = parapheTop - (canvasRect.top - containerRect.top);
+
+            // Convertir en coordonnées PDF (A4: 595x842 points)
+            parapheX = Math.round((relativeLeft / canvasRect.width) * 595);
+            parapheY = Math.round(842 - ((relativeTop + parapheRect.height) / canvasRect.height) * 842);
+        }
+
+        // Utiliser la taille actuelle du paraphe
+        const parapheDims = parapheImage.scale(currentParapheSize / parapheImage.width);
+
+        // Appliquer le paraphe à la même position sur toutes les pages
+        console.log(`✍️ Ajout du paraphe à (${parapheX}, ${parapheY}) sur toutes les pages`);
+        pages.forEach((page, index) => {
             page.drawImage(parapheImage, {
                 x: parapheX,
                 y: parapheY,
