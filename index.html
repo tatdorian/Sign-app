@@ -35,6 +35,11 @@
                         <img id="signature-preview" class="signature-draggable" alt="Signature">
                         <div class="signature-hint">🖱️ Glissez pour positionner</div>
                     </div>
+                    <!-- Zone interactive pour positionner le paraphe -->
+                    <div id="paraphe-overlay" class="signature-overlay" style="display: none;">
+                        <img id="paraphe-preview" class="signature-draggable paraphe-draggable" alt="Paraphe">
+                        <div class="signature-hint">🖱️ Glissez pour positionner le paraphe</div>
+                    </div>
                 </div>
 
                 <!-- Contrôle de taille de la signature -->
@@ -65,7 +70,7 @@
             <!-- Section 3: Paraphe -->
             <section class="card" id="paraphe-section" style="display: none;">
                 <h2>3. Créer votre paraphe (optionnel)</h2>
-                <p class="hint">Le paraphe sera appliqué sur toutes les pages du document</p>
+                <p class="hint">Placez le paraphe manuellement sur le document (il sera automatiquement copié sur toutes les pages)</p>
                 <div class="signature-controls">
                     <label for="paraphe-color">Couleur:</label>
                     <input type="color" id="paraphe-color" value="#000000">
@@ -78,20 +83,11 @@
                 <canvas id="paraphe-canvas" width="400" height="150"></canvas>
                 <p class="hint">Dessinez votre paraphe ci-dessus</p>
 
-                <!-- Contrôle de taille et position du paraphe -->
+                <!-- Contrôle de taille du paraphe -->
                 <div class="paraphe-controls">
                     <label>
                         📏 Taille: <span id="paraphe-size-value">80px</span>
                         <input type="range" id="paraphe-size" min="30" max="150" value="80" step="5">
-                    </label>
-                    <label>
-                        📍 Position:
-                        <select id="paraphe-position">
-                            <option value="bottom-right">Bas droite</option>
-                            <option value="bottom-left">Bas gauche</option>
-                            <option value="top-right">Haut droite</option>
-                            <option value="top-left">Haut gauche</option>
-                        </select>
                     </label>
                 </div>
             </section>
