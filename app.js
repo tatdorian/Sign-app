@@ -726,26 +726,47 @@ function constrainParaphePosition() {
     const paraphePreview = document.getElementById('paraphe-preview');
     if (!paraphePreview || !documentPreview) return;
 
-    const docCanvas = documentPreview.querySelector('canvas');
-    if (!docCanvas) return;
+    // Utiliser le conteneur de toutes les pages au lieu d'un seul canvas
+    const pagesContainer = document.getElementById('pdf-pages-container');
+    if (!pagesContainer) {
+        // Fallback pour les images
+        const docCanvas = documentPreview.querySelector('canvas');
+        if (!docCanvas) return;
 
-    const docRect = docCanvas.getBoundingClientRect();
+        const docRect = docCanvas.getBoundingClientRect();
+        const parapheRect = paraphePreview.getBoundingClientRect();
+        const containerRect = documentPreview.getBoundingClientRect();
+
+        let currentLeft = parseFloat(paraphePreview.style.left) || 0;
+        let currentTop = parseFloat(paraphePreview.style.top) || 0;
+
+        const relativeMaxX = (docRect.left - containerRect.left) + docRect.width - parapheRect.width;
+        const relativeMaxY = (docRect.top - containerRect.top) + docRect.height - parapheRect.height;
+
+        currentLeft = Math.max(0, Math.min(currentLeft, relativeMaxX));
+        currentTop = Math.max(0, Math.min(currentTop, relativeMaxY));
+
+        paraphePreview.style.left = `${currentLeft}px`;
+        paraphePreview.style.top = `${currentTop}px`;
+        return;
+    }
+
+    const containerRect = documentPreview.getBoundingClientRect();
+    const pagesRect = pagesContainer.getBoundingClientRect();
     const parapheRect = paraphePreview.getBoundingClientRect();
 
     // Récupérer la position actuelle
     let currentLeft = parseFloat(paraphePreview.style.left) || 0;
     let currentTop = parseFloat(paraphePreview.style.top) || 0;
 
-    // Calculer les dimensions effectives
-    const effectiveWidth = parapheRect.width;
-    const effectiveHeight = parapheRect.height;
+    // Calculer les limites relatives au document-preview
+    const relativeTop = pagesRect.top - containerRect.top;
+    const relativeLeft = pagesRect.left - containerRect.left;
+    const maxX = relativeLeft + pagesRect.width - parapheRect.width;
+    const maxY = relativeTop + pagesRect.height - parapheRect.height;
 
-    // Contraindre aux limites
-    const maxX = docRect.width - effectiveWidth;
-    const maxY = docRect.height - effectiveHeight;
-
-    currentLeft = Math.max(0, Math.min(currentLeft, maxX));
-    currentTop = Math.max(0, Math.min(currentTop, maxY));
+    currentLeft = Math.max(relativeLeft, Math.min(currentLeft, maxX));
+    currentTop = Math.max(relativeTop, Math.min(currentTop, maxY));
 
     // Appliquer les nouvelles positions
     paraphePreview.style.left = `${currentLeft}px`;
@@ -758,11 +779,8 @@ function startDragParaphe(e) {
 
     isDraggingParaphe = true;
     const rect = paraphePreview.getBoundingClientRect();
-    const docCanvas = documentPreview.querySelector('canvas');
-    if (docCanvas) {
-        dragStartXParaphe = e.clientX - rect.left;
-        dragStartYParaphe = e.clientY - rect.top;
-    }
+    dragStartXParaphe = e.clientX - rect.left;
+    dragStartYParaphe = e.clientY - rect.top;
     paraphePreview.style.cursor = 'grabbing';
 }
 
@@ -772,26 +790,44 @@ function dragParaphe(e) {
     const paraphePreview = document.getElementById('paraphe-preview');
     if (!paraphePreview) return;
 
-    const docCanvas = documentPreview.querySelector('canvas');
-    if (!docCanvas) return;
+    const containerRect = documentPreview.getBoundingClientRect();
 
-    const docRect = docCanvas.getBoundingClientRect();
+    // Position de la souris relative au conteneur document-preview
+    let mouseX = e.clientX - containerRect.left - dragStartXParaphe;
+    let mouseY = e.clientY - containerRect.top - dragStartYParaphe;
 
-    // Position de la souris relative au document
-    let mouseX = e.clientX - docRect.left - dragStartXParaphe;
-    let mouseY = e.clientY - docRect.top - dragStartYParaphe;
+    // Obtenir le conteneur de pages ou le canvas pour les images
+    const pagesContainer = document.getElementById('pdf-pages-container');
 
-    // Calculer les dimensions effectives du paraphe
-    const parapheRect = paraphePreview.getBoundingClientRect();
-    const effectiveWidth = parapheRect.width;
-    const effectiveHeight = parapheRect.height;
+    if (pagesContainer) {
+        // Mode multi-pages PDF
+        const pagesRect = pagesContainer.getBoundingClientRect();
+        const parapheRect = paraphePreview.getBoundingClientRect();
 
-    // Limiter aux bords du document
-    const maxX = docRect.width - effectiveWidth;
-    const maxY = docRect.height - effectiveHeight;
+        // Calculer les limites relatives au conteneur
+        const relativeTop = pagesRect.top - containerRect.top;
+        const relativeLeft = pagesRect.left - containerRect.left;
+        const maxX = relativeLeft + pagesRect.width - parapheRect.width;
+        const maxY = relativeTop + pagesRect.height - parapheRect.height;
 
-    mouseX = Math.max(0, Math.min(mouseX, maxX));
-    mouseY = Math.max(0, Math.min(mouseY, maxY));
+        mouseX = Math.max(relativeLeft, Math.min(mouseX, maxX));
+        mouseY = Math.max(relativeTop, Math.min(mouseY, maxY));
+    } else {
+        // Mode image simple
+        const docCanvas = documentPreview.querySelector('canvas');
+        if (docCanvas) {
+            const docRect = docCanvas.getBoundingClientRect();
+            const parapheRect = paraphePreview.getBoundingClientRect();
+
+            const relativeTop = docRect.top - containerRect.top;
+            const relativeLeft = docRect.left - containerRect.left;
+            const maxX = relativeLeft + docRect.width - parapheRect.width;
+            const maxY = relativeTop + docRect.height - parapheRect.height;
+
+            mouseX = Math.max(relativeLeft, Math.min(mouseX, maxX));
+            mouseY = Math.max(relativeTop, Math.min(mouseY, maxY));
+        }
+    }
 
     // Mettre à jour la position visuelle
     paraphePreview.style.left = `${mouseX}px`;
@@ -951,26 +987,47 @@ document.addEventListener('touchend', stopDrag);
 function constrainSignaturePosition() {
     if (!signaturePreview || !documentPreview) return;
 
-    const docCanvas = documentPreview.querySelector('canvas');
-    if (!docCanvas) return;
+    // Utiliser le conteneur de toutes les pages au lieu d'un seul canvas
+    const pagesContainer = document.getElementById('pdf-pages-container');
+    if (!pagesContainer) {
+        // Fallback pour les images
+        const docCanvas = documentPreview.querySelector('canvas');
+        if (!docCanvas) return;
 
-    const docRect = docCanvas.getBoundingClientRect();
+        const docRect = docCanvas.getBoundingClientRect();
+        const sigRect = signaturePreview.getBoundingClientRect();
+        const containerRect = documentPreview.getBoundingClientRect();
+
+        let currentLeft = parseFloat(signaturePreview.style.left) || 0;
+        let currentTop = parseFloat(signaturePreview.style.top) || 0;
+
+        const relativeMaxX = (docRect.left - containerRect.left) + docRect.width - sigRect.width;
+        const relativeMaxY = (docRect.top - containerRect.top) + docRect.height - sigRect.height;
+
+        currentLeft = Math.max(0, Math.min(currentLeft, relativeMaxX));
+        currentTop = Math.max(0, Math.min(currentTop, relativeMaxY));
+
+        signaturePreview.style.left = `${currentLeft}px`;
+        signaturePreview.style.top = `${currentTop}px`;
+        return;
+    }
+
+    const containerRect = documentPreview.getBoundingClientRect();
+    const pagesRect = pagesContainer.getBoundingClientRect();
     const sigRect = signaturePreview.getBoundingClientRect();
 
     // Récupérer la position actuelle
     let currentLeft = parseFloat(signaturePreview.style.left) || 0;
     let currentTop = parseFloat(signaturePreview.style.top) || 0;
 
-    // Calculer les dimensions effectives
-    const effectiveWidth = sigRect.width;
-    const effectiveHeight = sigRect.height;
+    // Calculer les limites relatives au document-preview
+    const relativeTop = pagesRect.top - containerRect.top;
+    const relativeLeft = pagesRect.left - containerRect.left;
+    const maxX = relativeLeft + pagesRect.width - sigRect.width;
+    const maxY = relativeTop + pagesRect.height - sigRect.height;
 
-    // Contraindre aux limites
-    const maxX = docRect.width - effectiveWidth;
-    const maxY = docRect.height - effectiveHeight;
-
-    currentLeft = Math.max(0, Math.min(currentLeft, maxX));
-    currentTop = Math.max(0, Math.min(currentTop, maxY));
+    currentLeft = Math.max(relativeLeft, Math.min(currentLeft, maxX));
+    currentTop = Math.max(relativeTop, Math.min(currentTop, maxY));
 
     // Appliquer les nouvelles positions
     signaturePreview.style.left = `${currentLeft}px`;
@@ -980,38 +1037,52 @@ function constrainSignaturePosition() {
 function startDrag(e) {
     isDragging = true;
     const rect = signaturePreview.getBoundingClientRect();
-    const docCanvas = documentPreview.querySelector('canvas');
-    if (docCanvas) {
-        const docRect = docCanvas.getBoundingClientRect();
-        dragStartX = e.clientX - rect.left;
-        dragStartY = e.clientY - rect.top;
-    }
+    dragStartX = e.clientX - rect.left;
+    dragStartY = e.clientY - rect.top;
     signaturePreview.style.cursor = 'grabbing';
 }
 
 function drag(e) {
     if (!isDragging) return;
 
-    const docCanvas = documentPreview.querySelector('canvas');
-    if (!docCanvas) return;
+    const containerRect = documentPreview.getBoundingClientRect();
 
-    const docRect = docCanvas.getBoundingClientRect();
+    // Position de la souris relative au conteneur document-preview
+    let mouseX = e.clientX - containerRect.left - dragStartX;
+    let mouseY = e.clientY - containerRect.top - dragStartY;
 
-    // Position de la souris relative au document
-    let mouseX = e.clientX - docRect.left - dragStartX;
-    let mouseY = e.clientY - docRect.top - dragStartY;
+    // Obtenir le conteneur de pages ou le canvas pour les images
+    const pagesContainer = document.getElementById('pdf-pages-container');
 
-    // Calculer les dimensions effectives de la signature avec le scale
-    const sigRect = signaturePreview.getBoundingClientRect();
-    const effectiveWidth = sigRect.width;
-    const effectiveHeight = sigRect.height;
+    if (pagesContainer) {
+        // Mode multi-pages PDF
+        const pagesRect = pagesContainer.getBoundingClientRect();
+        const sigRect = signaturePreview.getBoundingClientRect();
 
-    // Limiter aux bords du document (contrainte stricte)
-    const maxX = docRect.width - effectiveWidth;
-    const maxY = docRect.height - effectiveHeight;
+        // Calculer les limites relatives au conteneur
+        const relativeTop = pagesRect.top - containerRect.top;
+        const relativeLeft = pagesRect.left - containerRect.left;
+        const maxX = relativeLeft + pagesRect.width - sigRect.width;
+        const maxY = relativeTop + pagesRect.height - sigRect.height;
 
-    mouseX = Math.max(0, Math.min(mouseX, maxX));
-    mouseY = Math.max(0, Math.min(mouseY, maxY));
+        mouseX = Math.max(relativeLeft, Math.min(mouseX, maxX));
+        mouseY = Math.max(relativeTop, Math.min(mouseY, maxY));
+    } else {
+        // Mode image simple
+        const docCanvas = documentPreview.querySelector('canvas');
+        if (docCanvas) {
+            const docRect = docCanvas.getBoundingClientRect();
+            const sigRect = signaturePreview.getBoundingClientRect();
+
+            const relativeTop = docRect.top - containerRect.top;
+            const relativeLeft = docRect.left - containerRect.left;
+            const maxX = relativeLeft + docRect.width - sigRect.width;
+            const maxY = relativeTop + docRect.height - sigRect.height;
+
+            mouseX = Math.max(relativeLeft, Math.min(mouseX, maxX));
+            mouseY = Math.max(relativeTop, Math.min(mouseY, maxY));
+        }
+    }
 
     // Mettre à jour la position visuelle
     signaturePreview.style.left = `${mouseX}px`;
