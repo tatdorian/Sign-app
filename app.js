@@ -1028,6 +1028,18 @@ async function generateAndDownloadPDF() {
         return;
     }
 
+    // Demander le nom du fichier à l'utilisateur
+    const fileName = prompt('Entrez le nom du fichier PDF:', 'document_signé');
+
+    // Si l'utilisateur annule, ne pas télécharger
+    if (fileName === null) {
+        return;
+    }
+
+    // Nettoyer le nom de fichier (retirer les caractères non valides)
+    const cleanFileName = fileName.trim() || 'document_signé';
+    const finalFileName = cleanFileName.endsWith('.pdf') ? cleanFileName : `${cleanFileName}.pdf`;
+
     try {
         const pdfBytes = await createSignedPDF();
 
@@ -1036,7 +1048,7 @@ async function generateAndDownloadPDF() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `document_signé_${Date.now()}.pdf`;
+        a.download = finalFileName;
         a.click();
         URL.revokeObjectURL(url);
 
