@@ -1,5 +1,7 @@
 // Application de Signature de Documents
-// État global
+// ==============================================
+// ETAT GLOBAL
+// ==============================================
 const state = {
     uploadedFile: null,
     uploadedFileType: null,
@@ -13,11 +15,18 @@ const state = {
     totalPages: 1,
     currentPage: 1,
     signaturePage: 1,
-    paraphePosition: { x: 50, y: 50 }, // Position manuelle du paraphe
-    paraphePage: 1 // Page sur laquelle le paraphe est placé
+    signaturePageMode: 'current', // 'current', 'all', 'custom'
+    signatureCustomPages: [],     // pages selectionees en mode custom
+    paraphePosition: { x: 50, y: 50 },
+    paraphePage: 1,
+    signatureHistory: [],  // historique pour undo signature
+    parapheHistory: [],    // historique pour undo paraphe
+    previewVisible: false
 };
 
-// Éléments DOM
+// ==============================================
+// ELEMENTS DOM
+// ==============================================
 const fileInput = document.getElementById('file-input');
 const fileInfo = document.getElementById('file-info');
 const documentPreview = document.getElementById('document-preview');
@@ -28,12 +37,14 @@ const actionsSection = document.getElementById('actions-section');
 const signatureCanvas = document.getElementById('signature-canvas');
 const ctx = signatureCanvas.getContext('2d');
 const clearBtn = document.getElementById('clear-signature');
+const undoSignatureBtn = document.getElementById('undo-signature');
 const colorInput = document.getElementById('signature-color');
 const widthInput = document.getElementById('signature-width');
 
 const parapheCanvas = document.getElementById('paraphe-canvas');
 const ctxParaphe = parapheCanvas ? parapheCanvas.getContext('2d') : null;
 const clearParapheBtn = document.getElementById('clear-paraphe');
+const undoParapheBtn = document.getElementById('undo-paraphe');
 const parapheColorInput = document.getElementById('paraphe-color');
 const parapheWidthInput = document.getElementById('paraphe-width');
 
@@ -43,25 +54,25 @@ const emailForm = document.getElementById('email-form');
 const sendEmailBtn = document.getElementById('send-email-btn');
 const cancelEmailBtn = document.getElementById('cancel-email-btn');
 
-// Configuration du canvas de signature
+// Configuration du canvas
 ctx.lineJoin = 'round';
 ctx.lineCap = 'round';
 
-// Configuration du canvas de paraphe
 if (ctxParaphe) {
     ctxParaphe.lineJoin = 'round';
     ctxParaphe.lineCap = 'round';
 }
 
-// Rendre le canvas responsive sur mobile
+// ==============================================
+// CANVAS RESPONSIVE
+// ==============================================
 function resizeCanvas() {
     const isMobile = window.innerWidth <= 768;
     if (isMobile) {
         const container = signatureCanvas.parentElement;
-        const containerWidth = container.clientWidth - 40; // padding
+        const containerWidth = container.clientWidth - 40;
         signatureCanvas.width = containerWidth;
         signatureCanvas.height = 300;
-
         if (parapheCanvas) {
             parapheCanvas.width = containerWidth;
             parapheCanvas.height = 200;
@@ -69,28 +80,45 @@ function resizeCanvas() {
     } else {
         signatureCanvas.width = 600;
         signatureCanvas.height = 200;
-
         if (parapheCanvas) {
             parapheCanvas.width = 400;
             parapheCanvas.height = 150;
         }
     }
+    // Reconfigurer apres resize
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    if (ctxParaphe) {
+        ctxParaphe.lineJoin = 'round';
+        ctxParaphe.lineCap = 'round';
+    }
+    // Redessiner la signature si elle existe
+    if (state.signatureData) {
+        const img = new Image();
+        img.onload = () => {
+            ctx.drawImage(img, 0, 0, signatureCanvas.width, signatureCanvas.height);
+        };
+        img.src = state.signatureData;
+    }
+    if (state.parapheData && ctxParaphe) {
+        const img = new Image();
+        img.onload = () => {
+            ctxParaphe.drawImage(img, 0, 0, parapheCanvas.width, parapheCanvas.height);
+        };
+        img.src = state.parapheData;
+    }
 }
 
-// Appeler au chargement et au redimensionnement
 window.addEventListener('load', resizeCanvas);
 window.addEventListener('resize', resizeCanvas);
 
-// Gestion de l'upload de fichier
+// ==============================================
+// UPLOAD DE FICHIER
+// ==============================================
 fileInput.addEventListener('change', handleFileUpload);
-
-// ============================================
-// DRAG & DROP - Upload de documents
-// ============================================
 
 const dropZone = document.getElementById('drop-zone');
 
-// Empêcher le comportement par défaut pour tous les événements de drag
 ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
     dropZone.addEventListener(eventName, preventDefaults, false);
     document.body.addEventListener(eventName, preventDefaults, false);
@@ -101,86 +129,62 @@ function preventDefaults(e) {
     e.stopPropagation();
 }
 
-// Highlight de la zone de drop quand on survole
 ['dragenter', 'dragover'].forEach(eventName => {
-    dropZone.addEventListener(eventName, highlight, false);
+    dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false);
 });
 
 ['dragleave', 'drop'].forEach(eventName => {
-    dropZone.addEventListener(eventName, unhighlight, false);
+    dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'), false);
 });
 
-function highlight() {
-    dropZone.classList.add('dragover');
-}
-
-function unhighlight() {
-    dropZone.classList.remove('dragover');
-}
-
-// Gérer le drop du fichier
 dropZone.addEventListener('drop', handleDrop, false);
 
 function handleDrop(e) {
-    const dt = e.dataTransfer;
-    const files = dt.files;
-
+    const files = e.dataTransfer.files;
     if (files.length > 0) {
         const file = files[0];
-
-        // Vérifier le type de fichier
         if (file.type === 'application/pdf' || file.type.startsWith('image/')) {
-            // Créer un événement simulé pour handleFileUpload
-            const event = {
-                target: {
-                    files: [file]
-                }
-            };
-            handleFileUpload(event);
+            handleFileUpload({ target: { files: [file] } });
         } else {
-            alert('Veuillez déposer un fichier PDF ou une image (JPG, PNG)');
+            alert('Veuillez deposer un fichier PDF ou une image (JPG, PNG)');
         }
     }
 }
 
-// Cliquer sur la zone de drop ouvre aussi le sélecteur de fichiers
-dropZone.addEventListener('click', () => {
-    fileInput.click();
-});
+dropZone.addEventListener('click', () => fileInput.click());
 
 async function handleFileUpload(e) {
     const file = e.target.files[0];
     if (!file) return;
 
-    // Afficher le loader
     showLoader();
 
     try {
         state.uploadedFile = file;
-        fileInfo.textContent = `Fichier sélectionné: ${file.name}`;
+        fileInfo.textContent = `Fichier: ${file.name}`;
 
-        // Réinitialiser la prévisualisation de la signature
-        state.previewVisible = false;
+        // Reset overlays position for new document
         const signatureOverlay = document.getElementById('signature-overlay');
         const parapheOverlay = document.getElementById('paraphe-overlay');
-        const toggleBtn = document.getElementById('toggle-preview-btn');
+        const sigPreview = document.getElementById('signature-preview');
+        const parPreview = document.getElementById('paraphe-preview');
 
-        if (signatureOverlay) {
-            signatureOverlay.style.display = 'none';
+        if (signatureOverlay) signatureOverlay.style.display = 'none';
+        if (parapheOverlay) parapheOverlay.style.display = 'none';
+
+        // Reset position for new document
+        if (sigPreview) {
+            sigPreview.style.left = '';
+            sigPreview.style.top = '';
+        }
+        if (parPreview) {
+            parPreview.style.left = '';
+            parPreview.style.top = '';
         }
 
-        if (parapheOverlay) {
-            parapheOverlay.style.display = 'none';
-        }
-
-        if (toggleBtn) {
-            toggleBtn.textContent = '👁️ Afficher la signature sur le document';
-        }
-
-        // Supprimer les clones de paraphe
         removeParapheClones();
 
-        // Vider seulement le contenu du document (garder les overlays)
+        // Vider le contenu precedent (garder les overlays)
         const children = Array.from(documentPreview.children);
         children.forEach(child => {
             if (child.id !== 'signature-overlay' && child.id !== 'paraphe-overlay') {
@@ -196,88 +200,154 @@ async function handleFileUpload(e) {
             await loadImage(file);
         }
 
-        // Afficher les sections suivantes
+        // Afficher les sections
         signatureSection.style.display = 'block';
         parapheSection.style.display = 'block';
         actionsSection.style.display = 'block';
 
-        // Afficher le contrôle de taille de la signature
         const sizeControl = document.getElementById('signature-size-control');
-        if (sizeControl) {
-            sizeControl.style.display = 'block';
-        }
+        if (sizeControl) sizeControl.style.display = 'block';
 
-        // Si une signature existe déjà, l'afficher sur le nouveau document
+        // Afficher toolbar
+        const toolbar = document.getElementById('doc-toolbar');
+        if (toolbar) toolbar.style.display = 'flex';
+
+        // Afficher page selector si multi-pages
+        updatePageSelector();
+
+        // Si une signature/paraphe cache existe, l'afficher
         setTimeout(() => {
-            if (state.signatureData) {
-                showSignatureOnDocument();
-            }
-            if (state.parapheData) {
-                showParapheOnDocument();
-            }
+            if (state.signatureData) showSignatureOnDocument();
+            if (state.parapheData) showParapheOnDocument();
         }, 500);
     } catch (error) {
-        console.error('Erreur lors du chargement du fichier:', error);
-        alert('Erreur lors du chargement du fichier: ' + error.message);
+        console.error('Erreur chargement fichier:', error);
+        alert('Erreur lors du chargement: ' + error.message);
     } finally {
-        // Cacher le loader
         hideLoader();
     }
 }
 
-// Fonctions pour le loader
+// ==============================================
+// NOUVEAU DOCUMENT
+// ==============================================
+const newDocBtn = document.getElementById('new-doc-btn');
+if (newDocBtn) {
+    newDocBtn.addEventListener('click', () => {
+        // Reset document state mais garder signature/paraphe
+        state.uploadedFile = null;
+        state.uploadedFileType = null;
+        state.pdfDoc = null;
+        state.originalPdfBytes = null;
+        state.totalPages = 1;
+        state.currentPage = 1;
+        state.signaturePage = 1;
+        state.signaturePageMode = 'current';
+        state.signatureCustomPages = [];
+
+        // Reset overlays
+        const signatureOverlay = document.getElementById('signature-overlay');
+        const parapheOverlay = document.getElementById('paraphe-overlay');
+        const sigPreview = document.getElementById('signature-preview');
+        const parPreview = document.getElementById('paraphe-preview');
+
+        if (signatureOverlay) signatureOverlay.style.display = 'none';
+        if (parapheOverlay) parapheOverlay.style.display = 'none';
+        if (sigPreview) {
+            sigPreview.style.left = '';
+            sigPreview.style.top = '';
+        }
+        if (parPreview) {
+            parPreview.style.left = '';
+            parPreview.style.top = '';
+        }
+
+        removeParapheClones();
+
+        // Vider le preview
+        const children = Array.from(documentPreview.children);
+        children.forEach(child => {
+            if (child.id !== 'signature-overlay' && child.id !== 'paraphe-overlay') {
+                child.remove();
+            }
+        });
+
+        // Masquer les controls
+        const sizeControl = document.getElementById('signature-size-control');
+        const toolbar = document.getElementById('doc-toolbar');
+        const pageSelector = document.getElementById('page-selector-panel');
+        if (sizeControl) sizeControl.style.display = 'none';
+        if (toolbar) toolbar.style.display = 'none';
+        if (pageSelector) pageSelector.style.display = 'none';
+
+        // Remettre la zone d'upload visible
+        dropZone.style.display = '';
+        fileInput.value = '';
+        fileInfo.textContent = 'PDF ou Image (JPG, PNG)';
+
+        // Garder les sections signature/paraphe/actions visibles si signature existe
+        if (!state.signatureData) {
+            signatureSection.style.display = 'none';
+            parapheSection.style.display = 'none';
+            actionsSection.style.display = 'none';
+        }
+    });
+}
+
+// ==============================================
+// LOADER
+// ==============================================
 function showLoader() {
     const loader = document.getElementById('loading-overlay');
-    if (loader) {
-        loader.style.display = 'flex';
-    }
+    if (loader) loader.style.display = 'flex';
 }
 
 function hideLoader() {
     const loader = document.getElementById('loading-overlay');
-    if (loader) {
-        loader.style.display = 'none';
-    }
+    if (loader) loader.style.display = 'none';
 }
 
-// Charger et afficher un PDF
+// ==============================================
+// CHARGEMENT PDF - RESPONSIVE
+// ==============================================
 async function loadPDF(file) {
     const arrayBuffer = await file.arrayBuffer();
-
-    // Créer une copie de l'ArrayBuffer pour éviter le détachement
     const arrayBufferCopy = arrayBuffer.slice(0);
     state.originalPdfBytes = arrayBufferCopy;
 
-    // Utiliser PDF.js pour l'affichage (avec l'original)
     const loadingTask = pdfjsLib.getDocument(arrayBuffer);
     const pdf = await loadingTask.promise;
 
-    // Vider le contenu précédent (sauf les overlays)
+    // Vider contenu precedent
     const children = Array.from(documentPreview.children);
     children.forEach(child => {
-        if (child.id !== 'signature-overlay' && child.id !== 'paraphe-overlay' && child.id !== 'signature-size-control') {
+        if (child.id !== 'signature-overlay' && child.id !== 'paraphe-overlay') {
             child.remove();
         }
     });
 
-    // Créer un conteneur pour toutes les pages
     const pagesContainer = document.createElement('div');
     pagesContainer.className = 'pdf-pages-container';
     pagesContainer.id = 'pdf-pages-container';
 
-    // Afficher toutes les pages
     const numPages = pdf.numPages;
+
+    // Calculer le scale adaptatif base sur la largeur du conteneur
+    const containerWidth = documentPreview.clientWidth || 800;
+    const firstPage = await pdf.getPage(1);
+    const baseViewport = firstPage.getViewport({ scale: 1 });
+    // Scale pour que la page rentre dans le conteneur, avec un minimum de 1.5 pour la qualite
+    const fitScale = containerWidth / baseViewport.width;
+    const renderScale = Math.max(1.5, fitScale);
+
     for (let pageNum = 1; pageNum <= numPages; pageNum++) {
         const page = await pdf.getPage(pageNum);
-        const scale = 1.5;
-        const viewport = page.getViewport({ scale });
+        const viewport = page.getViewport({ scale: renderScale });
 
-        // Créer un conteneur pour chaque page
         const pageContainer = document.createElement('div');
         pageContainer.className = 'pdf-page-container';
         pageContainer.dataset.pageNumber = pageNum;
 
-        // Créer le canvas pour la page
         const canvas = document.createElement('canvas');
         const context = canvas.getContext('2d');
         canvas.height = viewport.height;
@@ -289,20 +359,18 @@ async function loadPDF(file) {
             viewport: viewport
         }).promise;
 
-        // Ajouter le numéro de page
         const pageLabel = document.createElement('div');
         pageLabel.className = 'page-label';
-        pageLabel.textContent = `Page ${pageNum}/${numPages}`;
+        pageLabel.textContent = `Page ${pageNum} / ${numPages}`;
 
         pageContainer.appendChild(canvas);
         pageContainer.appendChild(pageLabel);
         pagesContainer.appendChild(pageContainer);
     }
 
-    // Insérer le conteneur en premier (avant les overlays)
     documentPreview.insertBefore(pagesContainer, documentPreview.firstChild);
 
-    // S'assurer que les overlays sont positionnés correctement
+    // Positionner les overlays
     const signatureOverlay = document.getElementById('signature-overlay');
     const parapheOverlay = document.getElementById('paraphe-overlay');
 
@@ -322,14 +390,21 @@ async function loadPDF(file) {
         parapheOverlay.style.pointerEvents = 'none';
     }
 
-    // Stocker le nombre de pages
     state.totalPages = numPages;
     state.currentPage = 1;
 
-    console.log(`✅ PDF chargé : ${numPages} page(s)`);
+    // Mettre a jour l'info des pages
+    const pageInfoDisplay = document.getElementById('page-info-display');
+    if (pageInfoDisplay) {
+        pageInfoDisplay.textContent = `${numPages} page${numPages > 1 ? 's' : ''}`;
+    }
+
+    console.log(`PDF charge: ${numPages} page(s)`);
 }
 
-// Charger et afficher une image
+// ==============================================
+// CHARGEMENT IMAGE
+// ==============================================
 async function loadImage(file) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -338,10 +413,8 @@ async function loadImage(file) {
             img.src = e.target.result;
             img.style.maxWidth = '100%';
 
-            // Insérer en premier (avant les overlays)
             documentPreview.insertBefore(img, documentPreview.firstChild);
 
-            // S'assurer que les overlays sont positionnés correctement
             const signatureOverlay = document.getElementById('signature-overlay');
             const parapheOverlay = document.getElementById('paraphe-overlay');
 
@@ -361,6 +434,11 @@ async function loadImage(file) {
                 parapheOverlay.style.pointerEvents = 'none';
             }
 
+            state.totalPages = 1;
+
+            const pageInfoDisplay = document.getElementById('page-info-display');
+            if (pageInfoDisplay) pageInfoDisplay.textContent = 'Image';
+
             resolve();
         };
         reader.onerror = reject;
@@ -368,7 +446,9 @@ async function loadImage(file) {
     });
 }
 
-// Gestion du dessin de signature
+// ==============================================
+// DESSIN DE LA SIGNATURE (avec undo)
+// ==============================================
 let lastX = 0;
 let lastY = 0;
 
@@ -377,24 +457,28 @@ signatureCanvas.addEventListener('mousemove', draw);
 signatureCanvas.addEventListener('mouseup', stopDrawing);
 signatureCanvas.addEventListener('mouseout', stopDrawing);
 
-// Support tactile
 signatureCanvas.addEventListener('touchstart', (e) => {
     e.preventDefault();
+    // Sauvegarder l'etat avant le trait
+    state.signatureHistory.push(signatureCanvas.toDataURL());
     const touch = e.touches[0];
     const rect = signatureCanvas.getBoundingClientRect();
-    lastX = touch.clientX - rect.left;
-    lastY = touch.clientY - rect.top;
+    const scaleX = signatureCanvas.width / rect.width;
+    const scaleY = signatureCanvas.height / rect.height;
+    lastX = (touch.clientX - rect.left) * scaleX;
+    lastY = (touch.clientY - rect.top) * scaleY;
     state.isDrawing = true;
 });
 
 signatureCanvas.addEventListener('touchmove', (e) => {
     e.preventDefault();
     if (!state.isDrawing) return;
-
     const touch = e.touches[0];
     const rect = signatureCanvas.getBoundingClientRect();
-    const x = touch.clientX - rect.left;
-    const y = touch.clientY - rect.top;
+    const scaleX = signatureCanvas.width / rect.width;
+    const scaleY = signatureCanvas.height / rect.height;
+    const x = (touch.clientX - rect.left) * scaleX;
+    const y = (touch.clientY - rect.top) * scaleY;
 
     ctx.strokeStyle = colorInput.value;
     ctx.lineWidth = widthInput.value;
@@ -402,7 +486,6 @@ signatureCanvas.addEventListener('touchmove', (e) => {
     ctx.moveTo(lastX, lastY);
     ctx.lineTo(x, y);
     ctx.stroke();
-
     lastX = x;
     lastY = y;
 });
@@ -411,21 +494,28 @@ signatureCanvas.addEventListener('touchend', (e) => {
     e.preventDefault();
     state.isDrawing = false;
     state.signatureData = signatureCanvas.toDataURL();
+    saveToCache();
+    showSignatureOnDocument();
 });
 
 function startDrawing(e) {
+    // Sauvegarder l'etat avant le trait pour undo
+    state.signatureHistory.push(signatureCanvas.toDataURL());
     state.isDrawing = true;
     const rect = signatureCanvas.getBoundingClientRect();
-    lastX = e.clientX - rect.left;
-    lastY = e.clientY - rect.top;
+    const scaleX = signatureCanvas.width / rect.width;
+    const scaleY = signatureCanvas.height / rect.height;
+    lastX = (e.clientX - rect.left) * scaleX;
+    lastY = (e.clientY - rect.top) * scaleY;
 }
 
 function draw(e) {
     if (!state.isDrawing) return;
-
     const rect = signatureCanvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const scaleX = signatureCanvas.width / rect.width;
+    const scaleY = signatureCanvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
 
     ctx.strokeStyle = colorInput.value;
     ctx.lineWidth = widthInput.value;
@@ -433,7 +523,6 @@ function draw(e) {
     ctx.moveTo(lastX, lastY);
     ctx.lineTo(x, y);
     ctx.stroke();
-
     lastX = x;
     lastY = y;
 }
@@ -442,82 +531,108 @@ async function stopDrawing() {
     if (state.isDrawing) {
         state.isDrawing = false;
         state.signatureData = signatureCanvas.toDataURL();
-
-        // Sauvegarder automatiquement dans Supabase
         await saveSignatureToDatabase();
-
-        // Afficher automatiquement la signature sur le document
+        saveToCache();
         showSignatureOnDocument();
     }
 }
 
-// Afficher automatiquement la signature sur le document
-function showSignatureOnDocument() {
-    const signaturePreview = document.getElementById('signature-preview');
-    const signatureOverlay = document.getElementById('signature-overlay');
-
-    if (state.signatureData && signaturePreview && signatureOverlay) {
-        signaturePreview.src = state.signatureData;
-
-        // Attendre que l'image soit chargée avant d'afficher
-        signaturePreview.onload = () => {
-            signatureOverlay.style.display = 'block';
-            updateSignaturePreviewPosition();
-            console.log('✅ Signature affichée sur le document');
-        };
-
-        // Si l'image est déjà en cache, l'afficher immédiatement
-        if (signaturePreview.complete) {
-            signatureOverlay.style.display = 'block';
-            updateSignaturePreviewPosition();
-            console.log('✅ Signature affichée sur le document (cache)');
+// Undo signature
+if (undoSignatureBtn) {
+    undoSignatureBtn.addEventListener('click', () => {
+        if (state.signatureHistory.length > 0) {
+            const lastState = state.signatureHistory.pop();
+            const img = new Image();
+            img.onload = () => {
+                ctx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
+                ctx.drawImage(img, 0, 0);
+                state.signatureData = signatureCanvas.toDataURL();
+                // Verifier si le canvas est vide
+                const pixels = ctx.getImageData(0, 0, signatureCanvas.width, signatureCanvas.height).data;
+                const hasContent = pixels.some((val, i) => i % 4 === 3 && val > 0);
+                if (!hasContent) {
+                    state.signatureData = null;
+                    const overlay = document.getElementById('signature-overlay');
+                    if (overlay) overlay.style.display = 'none';
+                } else {
+                    showSignatureOnDocument();
+                }
+                saveToCache();
+            };
+            img.src = lastState;
+        } else {
+            ctx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
+            state.signatureData = null;
+            const overlay = document.getElementById('signature-overlay');
+            if (overlay) overlay.style.display = 'none';
+            saveToCache();
         }
-    }
+    });
 }
 
 // Effacer la signature
 clearBtn.addEventListener('click', () => {
     ctx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
     state.signatureData = null;
-    // Masquer la signature du document
+    state.signatureHistory = [];
     const signatureOverlay = document.getElementById('signature-overlay');
-    if (signatureOverlay) {
-        signatureOverlay.style.display = 'none';
-    }
+    if (signatureOverlay) signatureOverlay.style.display = 'none';
+    saveToCache();
 });
 
-// ============================================
-// GESTION DU PARAPHE
-// ============================================
+// ==============================================
+// AFFICHER LA SIGNATURE SUR LE DOCUMENT
+// ==============================================
+function showSignatureOnDocument() {
+    const signaturePreview = document.getElementById('signature-preview');
+    const signatureOverlay = document.getElementById('signature-overlay');
 
+    if (state.signatureData && signaturePreview && signatureOverlay) {
+        signaturePreview.src = state.signatureData;
+        signaturePreview.onload = () => {
+            signatureOverlay.style.display = 'block';
+            updateSignaturePreviewPosition();
+        };
+        if (signaturePreview.complete) {
+            signatureOverlay.style.display = 'block';
+            updateSignaturePreviewPosition();
+        }
+    }
+}
+
+// ==============================================
+// DESSIN DU PARAPHE (avec undo)
+// ==============================================
 let lastXParaphe = 0;
 let lastYParaphe = 0;
 
-// Dessin du paraphe - Souris
 if (parapheCanvas) {
     parapheCanvas.addEventListener('mousedown', startDrawingParaphe);
     parapheCanvas.addEventListener('mousemove', drawParaphe);
     parapheCanvas.addEventListener('mouseup', stopDrawingParaphe);
     parapheCanvas.addEventListener('mouseout', stopDrawingParaphe);
 
-    // Support tactile
     parapheCanvas.addEventListener('touchstart', (e) => {
         e.preventDefault();
+        state.parapheHistory.push(parapheCanvas.toDataURL());
         const touch = e.touches[0];
         const rect = parapheCanvas.getBoundingClientRect();
-        lastXParaphe = touch.clientX - rect.left;
-        lastYParaphe = touch.clientY - rect.top;
+        const scaleX = parapheCanvas.width / rect.width;
+        const scaleY = parapheCanvas.height / rect.height;
+        lastXParaphe = (touch.clientX - rect.left) * scaleX;
+        lastYParaphe = (touch.clientY - rect.top) * scaleY;
         state.isDrawingParaphe = true;
     });
 
     parapheCanvas.addEventListener('touchmove', (e) => {
         e.preventDefault();
         if (!state.isDrawingParaphe) return;
-
         const touch = e.touches[0];
         const rect = parapheCanvas.getBoundingClientRect();
-        const x = touch.clientX - rect.left;
-        const y = touch.clientY - rect.top;
+        const scaleX = parapheCanvas.width / rect.width;
+        const scaleY = parapheCanvas.height / rect.height;
+        const x = (touch.clientX - rect.left) * scaleX;
+        const y = (touch.clientY - rect.top) * scaleY;
 
         ctxParaphe.strokeStyle = parapheColorInput.value;
         ctxParaphe.lineWidth = parapheWidthInput.value;
@@ -525,7 +640,6 @@ if (parapheCanvas) {
         ctxParaphe.moveTo(lastXParaphe, lastYParaphe);
         ctxParaphe.lineTo(x, y);
         ctxParaphe.stroke();
-
         lastXParaphe = x;
         lastYParaphe = y;
     });
@@ -534,22 +648,28 @@ if (parapheCanvas) {
         e.preventDefault();
         state.isDrawingParaphe = false;
         state.parapheData = parapheCanvas.toDataURL();
+        saveToCache();
+        showParapheOnDocument();
     });
 }
 
 function startDrawingParaphe(e) {
+    state.parapheHistory.push(parapheCanvas.toDataURL());
     state.isDrawingParaphe = true;
     const rect = parapheCanvas.getBoundingClientRect();
-    lastXParaphe = e.clientX - rect.left;
-    lastYParaphe = e.clientY - rect.top;
+    const scaleX = parapheCanvas.width / rect.width;
+    const scaleY = parapheCanvas.height / rect.height;
+    lastXParaphe = (e.clientX - rect.left) * scaleX;
+    lastYParaphe = (e.clientY - rect.top) * scaleY;
 }
 
 function drawParaphe(e) {
     if (!state.isDrawingParaphe) return;
-
     const rect = parapheCanvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const scaleX = parapheCanvas.width / rect.width;
+    const scaleY = parapheCanvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
 
     ctxParaphe.strokeStyle = parapheColorInput.value;
     ctxParaphe.lineWidth = parapheWidthInput.value;
@@ -557,7 +677,6 @@ function drawParaphe(e) {
     ctxParaphe.moveTo(lastXParaphe, lastYParaphe);
     ctxParaphe.lineTo(x, y);
     ctxParaphe.stroke();
-
     lastXParaphe = x;
     lastYParaphe = y;
 }
@@ -566,10 +685,43 @@ function stopDrawingParaphe() {
     if (state.isDrawingParaphe) {
         state.isDrawingParaphe = false;
         state.parapheData = parapheCanvas.toDataURL();
-
-        // Afficher automatiquement le paraphe sur le document
+        saveToCache();
         showParapheOnDocument();
     }
+}
+
+// Undo paraphe
+if (undoParapheBtn) {
+    undoParapheBtn.addEventListener('click', () => {
+        if (state.parapheHistory.length > 0) {
+            const lastState = state.parapheHistory.pop();
+            const img = new Image();
+            img.onload = () => {
+                ctxParaphe.clearRect(0, 0, parapheCanvas.width, parapheCanvas.height);
+                ctxParaphe.drawImage(img, 0, 0);
+                state.parapheData = parapheCanvas.toDataURL();
+                const pixels = ctxParaphe.getImageData(0, 0, parapheCanvas.width, parapheCanvas.height).data;
+                const hasContent = pixels.some((val, i) => i % 4 === 3 && val > 0);
+                if (!hasContent) {
+                    state.parapheData = null;
+                    const overlay = document.getElementById('paraphe-overlay');
+                    if (overlay) overlay.style.display = 'none';
+                    removeParapheClones();
+                } else {
+                    showParapheOnDocument();
+                }
+                saveToCache();
+            };
+            img.src = lastState;
+        } else {
+            ctxParaphe.clearRect(0, 0, parapheCanvas.width, parapheCanvas.height);
+            state.parapheData = null;
+            const overlay = document.getElementById('paraphe-overlay');
+            if (overlay) overlay.style.display = 'none';
+            removeParapheClones();
+            saveToCache();
+        }
+    });
 }
 
 // Effacer le paraphe
@@ -577,93 +729,78 @@ if (clearParapheBtn) {
     clearParapheBtn.addEventListener('click', () => {
         ctxParaphe.clearRect(0, 0, parapheCanvas.width, parapheCanvas.height);
         state.parapheData = null;
-        // Masquer le paraphe du document
+        state.parapheHistory = [];
         const parapheOverlay = document.getElementById('paraphe-overlay');
-        if (parapheOverlay) {
-            parapheOverlay.style.display = 'none';
-        }
-        // Supprimer tous les clones
+        if (parapheOverlay) parapheOverlay.style.display = 'none';
         removeParapheClones();
+        saveToCache();
     });
 }
 
-// Gestion du slider de taille du paraphe
+// ==============================================
+// TAILLE DU PARAPHE
+// ==============================================
 const parapheSizeSlider = document.getElementById('paraphe-size');
 const parapheSizeValue = document.getElementById('paraphe-size-value');
-let currentParapheSize = 80; // Taille par défaut
+let currentParapheSize = 80;
 
 if (parapheSizeSlider && parapheSizeValue) {
     parapheSizeSlider.addEventListener('input', (e) => {
         currentParapheSize = parseInt(e.target.value);
         parapheSizeValue.textContent = `${currentParapheSize}px`;
-
-        // Mettre à jour la taille du paraphe s'il est affiché
         const paraphePreview = document.getElementById('paraphe-preview');
         const parapheOverlay = document.getElementById('paraphe-overlay');
-        if (paraphePreview && parapheOverlay.style.display !== 'none') {
+        if (paraphePreview && parapheOverlay && parapheOverlay.style.display !== 'none') {
             paraphePreview.style.width = `${currentParapheSize}px`;
             constrainParaphePosition();
-            // Recréer les clones avec la nouvelle taille
             createParapheClones();
         }
     });
 }
 
-// Afficher automatiquement le paraphe sur le document
+// ==============================================
+// AFFICHER LE PARAPHE SUR LE DOCUMENT
+// ==============================================
 function showParapheOnDocument() {
     const paraphePreview = document.getElementById('paraphe-preview');
     const parapheOverlay = document.getElementById('paraphe-overlay');
 
     if (state.parapheData && paraphePreview && parapheOverlay) {
         paraphePreview.src = state.parapheData;
-
-        // Attendre que l'image soit chargée avant d'afficher
         paraphePreview.onload = () => {
             parapheOverlay.style.display = 'block';
             updateParaphePreviewPosition();
             createParapheClones();
-            console.log('✅ Paraphe affiché sur le document');
         };
-
-        // Si l'image est déjà en cache, l'afficher immédiatement
         if (paraphePreview.complete) {
             parapheOverlay.style.display = 'block';
             updateParaphePreviewPosition();
             createParapheClones();
-            console.log('✅ Paraphe affiché sur le document (cache)');
         }
     }
 }
 
-// Créer des clones du paraphe sur toutes les pages
+// ==============================================
+// CLONES DU PARAPHE SUR TOUTES LES PAGES
+// ==============================================
 function createParapheClones() {
-    // Supprimer les anciens clones
     removeParapheClones();
 
     const paraphePreview = document.getElementById('paraphe-preview');
     const pagesContainer = document.getElementById('pdf-pages-container');
-
     if (!paraphePreview || !pagesContainer || !state.parapheData) return;
 
     const pageContainers = pagesContainer.querySelectorAll('.pdf-page-container');
-    const parapheRect = paraphePreview.getBoundingClientRect();
     const containerRect = documentPreview.getBoundingClientRect();
     const parapheOverlay = document.getElementById('paraphe-overlay');
-
-    // Position du paraphe principal
     const mainLeft = parseFloat(paraphePreview.style.left) || 0;
     const mainTop = parseFloat(paraphePreview.style.top) || 0;
-
-    // Pour chaque page sauf celle où est le paraphe principal
     const mainPageNum = detectParaphePage();
 
-    pageContainers.forEach((pageContainer, index) => {
+    pageContainers.forEach((pageContainer) => {
         const pageNum = parseInt(pageContainer.dataset.pageNumber);
-
-        // Ne pas créer de clone sur la page du paraphe principal
         if (pageNum === mainPageNum) return;
 
-        // Créer un clone du paraphe
         const clone = document.createElement('img');
         clone.src = state.parapheData;
         clone.className = 'paraphe-clone';
@@ -678,7 +815,6 @@ function createParapheClones() {
         clone.style.background = 'rgba(255, 255, 255, 0.9)';
         clone.style.boxShadow = '0 4px 12px rgba(118, 75, 162, 0.3)';
 
-        // Calculer la position relative pour ce clone
         const pageCanvas = pageContainer.querySelector('.pdf-page-canvas');
         if (pageCanvas) {
             const pageRect = pageCanvas.getBoundingClientRect();
@@ -687,12 +823,8 @@ function createParapheClones() {
 
             if (mainCanvas) {
                 const mainCanvasRect = mainCanvas.getBoundingClientRect();
-
-                // Position relative du paraphe sur sa page
                 const relativeLeft = mainLeft - (mainCanvasRect.left - containerRect.left);
                 const relativeTop = mainTop - (mainCanvasRect.top - containerRect.top);
-
-                // Appliquer la même position relative sur cette page
                 const cloneLeft = (pageRect.left - containerRect.left) + relativeLeft;
                 const cloneTop = (pageRect.top - containerRect.top) + relativeTop;
 
@@ -704,93 +836,67 @@ function createParapheClones() {
 
         parapheOverlay.appendChild(clone);
     });
-
-    console.log(`✅ ${pageContainers.length - 1} clones de paraphe créés`);
 }
 
-// Supprimer tous les clones de paraphe
 function removeParapheClones() {
     const parapheOverlay = document.getElementById('paraphe-overlay');
     if (!parapheOverlay) return;
-
-    const clones = parapheOverlay.querySelectorAll('.paraphe-clone');
-    clones.forEach(clone => clone.remove());
+    parapheOverlay.querySelectorAll('.paraphe-clone').forEach(clone => clone.remove());
 }
 
-// Mettre à jour la position du paraphe
+// ==============================================
+// POSITION DU PARAPHE
+// ==============================================
 function updateParaphePreviewPosition() {
     const paraphePreview = document.getElementById('paraphe-preview');
     const parapheOverlay = document.getElementById('paraphe-overlay');
-
-    if (!paraphePreview || !parapheOverlay) {
-        console.log('❌ paraphePreview ou parapheOverlay non disponible');
-        return;
-    }
+    if (!paraphePreview || !parapheOverlay) return;
 
     paraphePreview.style.width = `${currentParapheSize}px`;
     paraphePreview.style.height = 'auto';
 
-    // Position initiale dans le coin bas droit de la première page
-    if (!paraphePreview.style.left || paraphePreview.style.left === '0px') {
+    // Position initiale: coin bas droit de la premiere page
+    if (!paraphePreview.style.left || paraphePreview.style.left === '') {
         const pagesContainer = document.getElementById('pdf-pages-container');
         const firstPageContainer = pagesContainer ? pagesContainer.querySelector('.pdf-page-container') : null;
-        const firstCanvas = firstPageContainer ? firstPageContainer.querySelector('.pdf-page-canvas') : documentPreview.querySelector('canvas');
+        const firstCanvas = firstPageContainer ? firstPageContainer.querySelector('.pdf-page-canvas') : documentPreview.querySelector('canvas, img');
 
         if (firstCanvas) {
-            // Utiliser getBoundingClientRect() pour avoir les dimensions réelles affichées
             const canvasRect = firstCanvas.getBoundingClientRect();
             const containerRect = documentPreview.getBoundingClientRect();
-
-            // Calculer la position relative au document-preview
             const canvasRelativeTop = canvasRect.top - containerRect.top;
             const canvasRelativeLeft = canvasRect.left - containerRect.left;
 
-            // Positionner dans le coin bas droit (avec marge)
             const posX = canvasRelativeLeft + canvasRect.width - currentParapheSize - 20;
             const posY = canvasRelativeTop + canvasRect.height - currentParapheSize - 20;
 
             paraphePreview.style.left = `${Math.max(10, posX)}px`;
             paraphePreview.style.top = `${Math.max(10, posY)}px`;
-
-            // Sauvegarder la position
             state.paraphePosition = { x: posX, y: posY };
-
-            console.log(`✅ Paraphe positionné à (${posX}, ${posY}) - Canvas: ${canvasRect.width}x${canvasRect.height}`);
-
-            // Définir la page du paraphe
             state.paraphePage = 1;
         } else {
-            // Fallback si pas de canvas
             paraphePreview.style.left = '50px';
             paraphePreview.style.top = '50px';
             state.paraphePosition = { x: 50, y: 50 };
-            console.log('⚠️ Utilisation de la position fallback pour paraphe');
         }
     }
 
-    // S'assurer que le paraphe est visible
     paraphePreview.style.position = 'absolute';
     paraphePreview.style.display = 'block';
     paraphePreview.style.zIndex = '9';
     paraphePreview.style.pointerEvents = 'auto';
-
-    console.log(`✅ Paraphe visible: display=${paraphePreview.style.display}, left=${paraphePreview.style.left}, top=${paraphePreview.style.top}`);
 }
 
-// ============================================
-// DRAG & DROP - Positionnement du paraphe
-// ============================================
-
+// ==============================================
+// DRAG & DROP - PARAPHE
+// ==============================================
 const paraphePreview = document.getElementById('paraphe-preview');
 let isDraggingParaphe = false;
 let dragStartXParaphe = 0;
 let dragStartYParaphe = 0;
 
-// Drag & Drop du paraphe
 if (paraphePreview) {
     paraphePreview.addEventListener('mousedown', startDragParaphe);
-
-    // Support tactile pour le drag
     paraphePreview.addEventListener('touchstart', (e) => {
         if (e.touches.length === 1) {
             const touch = e.touches[0];
@@ -805,327 +911,189 @@ document.addEventListener('mouseup', stopDragParaphe);
 document.addEventListener('touchmove', (e) => {
     if (isDraggingParaphe && e.touches.length === 1) {
         e.preventDefault();
-        const touch = e.touches[0];
-        dragParaphe({ clientX: touch.clientX, clientY: touch.clientY });
+        dragParaphe({ clientX: e.touches[0].clientX, clientY: e.touches[0].clientY });
     }
 });
 
 document.addEventListener('touchend', stopDragParaphe);
 
-// Fonction pour contraindre le paraphe aux limites du PDF
 function constrainParaphePosition() {
     const paraphePreview = document.getElementById('paraphe-preview');
     if (!paraphePreview || !documentPreview) return;
 
-    // Utiliser le conteneur de toutes les pages au lieu d'un seul canvas
     const pagesContainer = document.getElementById('pdf-pages-container');
     if (!pagesContainer) {
-        // Fallback pour les images
-        const docCanvas = documentPreview.querySelector('canvas');
-        if (!docCanvas) return;
-
-        const docRect = docCanvas.getBoundingClientRect();
+        const docEl = documentPreview.querySelector('canvas, img');
+        if (!docEl) return;
+        const docRect = docEl.getBoundingClientRect();
         const parapheRect = paraphePreview.getBoundingClientRect();
         const containerRect = documentPreview.getBoundingClientRect();
-
         let currentLeft = parseFloat(paraphePreview.style.left) || 0;
         let currentTop = parseFloat(paraphePreview.style.top) || 0;
-
         const relativeMaxX = (docRect.left - containerRect.left) + docRect.width - parapheRect.width;
         const relativeMaxY = (docRect.top - containerRect.top) + docRect.height - parapheRect.height;
-
-        currentLeft = Math.max(0, Math.min(currentLeft, relativeMaxX));
-        currentTop = Math.max(0, Math.min(currentTop, relativeMaxY));
-
-        paraphePreview.style.left = `${currentLeft}px`;
-        paraphePreview.style.top = `${currentTop}px`;
+        paraphePreview.style.left = `${Math.max(0, Math.min(currentLeft, relativeMaxX))}px`;
+        paraphePreview.style.top = `${Math.max(0, Math.min(currentTop, relativeMaxY))}px`;
         return;
     }
 
     const containerRect = documentPreview.getBoundingClientRect();
     const pagesRect = pagesContainer.getBoundingClientRect();
     const parapheRect = paraphePreview.getBoundingClientRect();
-
-    // Récupérer la position actuelle
     let currentLeft = parseFloat(paraphePreview.style.left) || 0;
     let currentTop = parseFloat(paraphePreview.style.top) || 0;
-
-    // Calculer les limites relatives au document-preview
     const relativeTop = pagesRect.top - containerRect.top;
     const relativeLeft = pagesRect.left - containerRect.left;
     const maxX = relativeLeft + pagesRect.width - parapheRect.width;
     const maxY = relativeTop + pagesRect.height - parapheRect.height;
 
-    currentLeft = Math.max(relativeLeft, Math.min(currentLeft, maxX));
-    currentTop = Math.max(relativeTop, Math.min(currentTop, maxY));
-
-    // Appliquer les nouvelles positions
-    paraphePreview.style.left = `${currentLeft}px`;
-    paraphePreview.style.top = `${currentTop}px`;
+    paraphePreview.style.left = `${Math.max(relativeLeft, Math.min(currentLeft, maxX))}px`;
+    paraphePreview.style.top = `${Math.max(relativeTop, Math.min(currentTop, maxY))}px`;
 }
 
 function startDragParaphe(e) {
-    const paraphePreview = document.getElementById('paraphe-preview');
-    if (!paraphePreview) return;
-
+    const el = document.getElementById('paraphe-preview');
+    if (!el) return;
     isDraggingParaphe = true;
-    const rect = paraphePreview.getBoundingClientRect();
+    const rect = el.getBoundingClientRect();
     dragStartXParaphe = e.clientX - rect.left;
     dragStartYParaphe = e.clientY - rect.top;
-    paraphePreview.style.cursor = 'grabbing';
+    el.style.cursor = 'grabbing';
 }
 
 function dragParaphe(e) {
     if (!isDraggingParaphe) return;
-
-    const paraphePreview = document.getElementById('paraphe-preview');
-    if (!paraphePreview) return;
+    const el = document.getElementById('paraphe-preview');
+    if (!el) return;
 
     const containerRect = documentPreview.getBoundingClientRect();
-
-    // Position de la souris relative au conteneur document-preview
     let mouseX = e.clientX - containerRect.left - dragStartXParaphe;
     let mouseY = e.clientY - containerRect.top - dragStartYParaphe;
 
-    // Obtenir le conteneur de pages ou le canvas pour les images
     const pagesContainer = document.getElementById('pdf-pages-container');
-
     if (pagesContainer) {
-        // Mode multi-pages PDF
         const pagesRect = pagesContainer.getBoundingClientRect();
-        const parapheRect = paraphePreview.getBoundingClientRect();
-
-        // Calculer les limites relatives au conteneur
+        const elRect = el.getBoundingClientRect();
         const relativeTop = pagesRect.top - containerRect.top;
         const relativeLeft = pagesRect.left - containerRect.left;
-        const maxX = relativeLeft + pagesRect.width - parapheRect.width;
-        const maxY = relativeTop + pagesRect.height - parapheRect.height;
-
+        const maxX = relativeLeft + pagesRect.width - elRect.width;
+        const maxY = relativeTop + pagesRect.height - elRect.height;
         mouseX = Math.max(relativeLeft, Math.min(mouseX, maxX));
         mouseY = Math.max(relativeTop, Math.min(mouseY, maxY));
-    } else {
-        // Mode image simple
-        const docCanvas = documentPreview.querySelector('canvas');
-        if (docCanvas) {
-            const docRect = docCanvas.getBoundingClientRect();
-            const parapheRect = paraphePreview.getBoundingClientRect();
-
-            const relativeTop = docRect.top - containerRect.top;
-            const relativeLeft = docRect.left - containerRect.left;
-            const maxX = relativeLeft + docRect.width - parapheRect.width;
-            const maxY = relativeTop + docRect.height - parapheRect.height;
-
-            mouseX = Math.max(relativeLeft, Math.min(mouseX, maxX));
-            mouseY = Math.max(relativeTop, Math.min(mouseY, maxY));
-        }
     }
 
-    // Mettre à jour la position visuelle
-    paraphePreview.style.left = `${mouseX}px`;
-    paraphePreview.style.top = `${mouseY}px`;
-
-    // Sauvegarder la position
+    el.style.left = `${mouseX}px`;
+    el.style.top = `${mouseY}px`;
     state.paraphePosition = { x: mouseX, y: mouseY };
 }
 
 function stopDragParaphe() {
     if (isDraggingParaphe) {
-        const paraphePreview = document.getElementById('paraphe-preview');
-        if (paraphePreview) {
+        const el = document.getElementById('paraphe-preview');
+        if (el) {
             isDraggingParaphe = false;
-            paraphePreview.style.cursor = 'move';
-
-            // Détecter sur quelle page le paraphe a été placé
+            el.style.cursor = 'move';
             detectParaphePage();
-
-            // Recréer les clones avec la nouvelle position
             createParapheClones();
         }
     }
 }
 
-// Détecter sur quelle page le paraphe est placé
 function detectParaphePage() {
-    const paraphePreview = document.getElementById('paraphe-preview');
-    const parapheOverlay = document.getElementById('paraphe-overlay');
-
-    if (!paraphePreview || !parapheOverlay) return 1;
-
-    const parapheRect = paraphePreview.getBoundingClientRect();
-    const parapheCenterY = parapheRect.top + parapheRect.height / 2;
+    const el = document.getElementById('paraphe-preview');
+    if (!el) return 1;
+    const elRect = el.getBoundingClientRect();
+    const centerY = elRect.top + elRect.height / 2;
 
     const pagesContainer = document.getElementById('pdf-pages-container');
     if (!pagesContainer) return 1;
 
-    const pageContainers = pagesContainer.querySelectorAll('.pdf-page-container');
-
-    for (let i = 0; i < pageContainers.length; i++) {
-        const pageContainer = pageContainers[i];
-        const pageRect = pageContainer.getBoundingClientRect();
-
-        // Vérifier si le centre du paraphe est dans cette page
-        if (parapheCenterY >= pageRect.top && parapheCenterY <= pageRect.bottom) {
-            state.paraphePage = parseInt(pageContainer.dataset.pageNumber);
-            console.log(`✍️ Paraphe sur la page ${state.paraphePage}`);
+    const pages = pagesContainer.querySelectorAll('.pdf-page-container');
+    for (const page of pages) {
+        const pageRect = page.getBoundingClientRect();
+        if (centerY >= pageRect.top && centerY <= pageRect.bottom) {
+            state.paraphePage = parseInt(page.dataset.pageNumber);
             return state.paraphePage;
         }
     }
-
     return 1;
 }
 
-// ============================================
-// SAUVEGARDE AUTOMATIQUE DE LA SIGNATURE
-// ============================================
-
-// Sauvegarder automatiquement la signature
-async function saveSignatureToDatabase() {
-    if (!state.signatureData) return;
-
-    try {
-        // Sauvegarder dans localStorage
-        localStorage.setItem('lastSignature', state.signatureData);
-
-        // Sauvegarder dans Supabase si disponible
-        if (typeof saveSignatureTemplate === 'function') {
-            const result = await saveSignatureTemplate('Signature', state.signatureData);
-            if (result.success) {
-                console.log('✅ Signature sauvegardée dans Supabase');
-            }
-        }
-    } catch (error) {
-        console.warn('⚠️ Erreur sauvegarde signature:', error);
-    }
-}
-
-// Charger la dernière signature au démarrage
-async function loadLastSignature() {
-    try {
-        const localSignature = localStorage.getItem('lastSignature');
-        if (localSignature) {
-            state.signatureData = localSignature;
-            const img = new Image();
-            img.onload = () => {
-                ctx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
-                ctx.drawImage(img, 0, 0, signatureCanvas.width, signatureCanvas.height);
-                console.log('✅ Signature chargée');
-            };
-            img.src = state.signatureData;
-        }
-    } catch (error) {
-        console.warn('⚠️ Erreur chargement signature:', error);
-    }
-}
-
-// Charger la signature au démarrage de l'application
-window.addEventListener('DOMContentLoaded', () => {
-    loadLastSignature();
-});
-
-// ============================================
-// DRAG & DROP - Positionnement de la signature
-// ============================================
-
+// ==============================================
+// DRAG & DROP - SIGNATURE
+// ==============================================
 const signatureOverlay = document.getElementById('signature-overlay');
 const signaturePreview = document.getElementById('signature-preview');
 
-// Nouveau slider de taille sous le PDF
 const signatureSizeSlider = document.getElementById('signature-size-slider');
 const sizeValueDisplay = document.getElementById('size-value-display');
 
 let isDragging = false;
 let dragStartX = 0;
 let dragStartY = 0;
-let currentSignatureWidth = 150; // Taille par défaut
+let currentSignatureWidth = 150;
 
-// Gestion du slider de taille sous le PDF
 if (signatureSizeSlider && sizeValueDisplay) {
     signatureSizeSlider.addEventListener('input', (e) => {
         currentSignatureWidth = parseInt(e.target.value);
         sizeValueDisplay.textContent = `${currentSignatureWidth}px`;
-
         if (signaturePreview && signatureOverlay.style.display !== 'none') {
-            // Mettre à jour la largeur de la signature
             signaturePreview.style.width = `${currentSignatureWidth}px`;
-
-            // Contraindre aux limites après le changement de taille
             constrainSignaturePosition();
         }
     });
 }
 
-// Drag & Drop de la signature
 signaturePreview.addEventListener('mousedown', startDrag);
 document.addEventListener('mousemove', drag);
 document.addEventListener('mouseup', stopDrag);
 
-// Support tactile pour le drag
 signaturePreview.addEventListener('touchstart', (e) => {
     if (e.touches.length === 1) {
-        const touch = e.touches[0];
-        startDrag({ clientX: touch.clientX, clientY: touch.clientY });
+        startDrag({ clientX: e.touches[0].clientX, clientY: e.touches[0].clientY });
     }
 });
 
 document.addEventListener('touchmove', (e) => {
     if (isDragging && e.touches.length === 1) {
         e.preventDefault();
-        const touch = e.touches[0];
-        drag({ clientX: touch.clientX, clientY: touch.clientY });
+        drag({ clientX: e.touches[0].clientX, clientY: e.touches[0].clientY });
     }
 });
 
 document.addEventListener('touchend', stopDrag);
 
-// Fonction pour contraindre la signature aux limites du PDF
 function constrainSignaturePosition() {
     if (!signaturePreview || !documentPreview) return;
 
-    // Utiliser le conteneur de toutes les pages au lieu d'un seul canvas
     const pagesContainer = document.getElementById('pdf-pages-container');
     if (!pagesContainer) {
-        // Fallback pour les images
-        const docCanvas = documentPreview.querySelector('canvas');
-        if (!docCanvas) return;
-
-        const docRect = docCanvas.getBoundingClientRect();
+        const docEl = documentPreview.querySelector('canvas, img');
+        if (!docEl) return;
+        const docRect = docEl.getBoundingClientRect();
         const sigRect = signaturePreview.getBoundingClientRect();
         const containerRect = documentPreview.getBoundingClientRect();
-
         let currentLeft = parseFloat(signaturePreview.style.left) || 0;
         let currentTop = parseFloat(signaturePreview.style.top) || 0;
-
         const relativeMaxX = (docRect.left - containerRect.left) + docRect.width - sigRect.width;
         const relativeMaxY = (docRect.top - containerRect.top) + docRect.height - sigRect.height;
-
-        currentLeft = Math.max(0, Math.min(currentLeft, relativeMaxX));
-        currentTop = Math.max(0, Math.min(currentTop, relativeMaxY));
-
-        signaturePreview.style.left = `${currentLeft}px`;
-        signaturePreview.style.top = `${currentTop}px`;
+        signaturePreview.style.left = `${Math.max(0, Math.min(currentLeft, relativeMaxX))}px`;
+        signaturePreview.style.top = `${Math.max(0, Math.min(currentTop, relativeMaxY))}px`;
         return;
     }
 
     const containerRect = documentPreview.getBoundingClientRect();
     const pagesRect = pagesContainer.getBoundingClientRect();
     const sigRect = signaturePreview.getBoundingClientRect();
-
-    // Récupérer la position actuelle
     let currentLeft = parseFloat(signaturePreview.style.left) || 0;
     let currentTop = parseFloat(signaturePreview.style.top) || 0;
-
-    // Calculer les limites relatives au document-preview
     const relativeTop = pagesRect.top - containerRect.top;
     const relativeLeft = pagesRect.left - containerRect.left;
     const maxX = relativeLeft + pagesRect.width - sigRect.width;
     const maxY = relativeTop + pagesRect.height - sigRect.height;
 
-    currentLeft = Math.max(relativeLeft, Math.min(currentLeft, maxX));
-    currentTop = Math.max(relativeTop, Math.min(currentTop, maxY));
-
-    // Appliquer les nouvelles positions
-    signaturePreview.style.left = `${currentLeft}px`;
-    signaturePreview.style.top = `${currentTop}px`;
+    signaturePreview.style.left = `${Math.max(relativeLeft, Math.min(currentLeft, maxX))}px`;
+    signaturePreview.style.top = `${Math.max(relativeTop, Math.min(currentTop, maxY))}px`;
 }
 
 function startDrag(e) {
@@ -1140,45 +1108,21 @@ function drag(e) {
     if (!isDragging) return;
 
     const containerRect = documentPreview.getBoundingClientRect();
-
-    // Position de la souris relative au conteneur document-preview
     let mouseX = e.clientX - containerRect.left - dragStartX;
     let mouseY = e.clientY - containerRect.top - dragStartY;
 
-    // Obtenir le conteneur de pages ou le canvas pour les images
     const pagesContainer = document.getElementById('pdf-pages-container');
-
     if (pagesContainer) {
-        // Mode multi-pages PDF
         const pagesRect = pagesContainer.getBoundingClientRect();
         const sigRect = signaturePreview.getBoundingClientRect();
-
-        // Calculer les limites relatives au conteneur
         const relativeTop = pagesRect.top - containerRect.top;
         const relativeLeft = pagesRect.left - containerRect.left;
         const maxX = relativeLeft + pagesRect.width - sigRect.width;
         const maxY = relativeTop + pagesRect.height - sigRect.height;
-
         mouseX = Math.max(relativeLeft, Math.min(mouseX, maxX));
         mouseY = Math.max(relativeTop, Math.min(mouseY, maxY));
-    } else {
-        // Mode image simple
-        const docCanvas = documentPreview.querySelector('canvas');
-        if (docCanvas) {
-            const docRect = docCanvas.getBoundingClientRect();
-            const sigRect = signaturePreview.getBoundingClientRect();
-
-            const relativeTop = docRect.top - containerRect.top;
-            const relativeLeft = docRect.left - containerRect.left;
-            const maxX = relativeLeft + docRect.width - sigRect.width;
-            const maxY = relativeTop + docRect.height - sigRect.height;
-
-            mouseX = Math.max(relativeLeft, Math.min(mouseX, maxX));
-            mouseY = Math.max(relativeTop, Math.min(mouseY, maxY));
-        }
     }
 
-    // Mettre à jour la position visuelle
     signaturePreview.style.left = `${mouseX}px`;
     signaturePreview.style.top = `${mouseY}px`;
 }
@@ -1187,116 +1131,281 @@ function stopDrag() {
     if (isDragging) {
         isDragging = false;
         signaturePreview.style.cursor = 'move';
-        // Détecter sur quelle page la signature a été placée
         detectSignaturePage();
+        updateCurrentPageDisplay();
     }
 }
 
-// Mettre à jour la position de la signature
 function updateSignaturePreviewPosition() {
-    if (!signaturePreview || !signatureOverlay) {
-        console.log('❌ signaturePreview ou signatureOverlay non disponible');
-        return;
-    }
+    if (!signaturePreview || !signatureOverlay) return;
 
     signaturePreview.style.width = `${currentSignatureWidth}px`;
     signaturePreview.style.height = 'auto';
 
-    // Position initiale au centre de la première page
-    if (!signaturePreview.style.left || signaturePreview.style.left === '0px') {
+    // Position initiale au centre de la premiere page
+    if (!signaturePreview.style.left || signaturePreview.style.left === '') {
         const pagesContainer = document.getElementById('pdf-pages-container');
         const firstPageContainer = pagesContainer ? pagesContainer.querySelector('.pdf-page-container') : null;
-        const firstCanvas = firstPageContainer ? firstPageContainer.querySelector('.pdf-page-canvas') : documentPreview.querySelector('canvas');
+        const firstCanvas = firstPageContainer ? firstPageContainer.querySelector('.pdf-page-canvas') : documentPreview.querySelector('canvas, img');
 
         if (firstCanvas) {
-            // Utiliser getBoundingClientRect() pour avoir les dimensions réelles affichées
             const canvasRect = firstCanvas.getBoundingClientRect();
             const containerRect = documentPreview.getBoundingClientRect();
-
-            // Calculer la position relative au document-preview
             const canvasRelativeTop = canvasRect.top - containerRect.top;
             const canvasRelativeLeft = canvasRect.left - containerRect.left;
 
-            // Centrer la signature sur la première page (coordonnées relatives)
             const centerX = canvasRelativeLeft + (canvasRect.width - currentSignatureWidth) / 2;
             const centerY = canvasRelativeTop + canvasRect.height / 2;
 
             signaturePreview.style.left = `${Math.max(10, centerX)}px`;
             signaturePreview.style.top = `${Math.max(10, centerY)}px`;
-
-            console.log(`✅ Signature positionnée à (${centerX}, ${centerY}) - Canvas: ${canvasRect.width}x${canvasRect.height}`);
-
-            // Définir la page de signature
             state.signaturePage = 1;
         } else {
-            // Fallback si pas de canvas
             signaturePreview.style.left = '50px';
             signaturePreview.style.top = '50px';
-            console.log('⚠️ Utilisation de la position fallback');
         }
     }
 
-    // S'assurer que la signature est visible avec !important styles
     signaturePreview.style.position = 'absolute';
     signaturePreview.style.display = 'block';
     signaturePreview.style.zIndex = '10';
     signaturePreview.style.pointerEvents = 'auto';
-
-    console.log(`✅ Signature visible: display=${signaturePreview.style.display}, left=${signaturePreview.style.left}, top=${signaturePreview.style.top}`);
 }
 
-// Détecter sur quelle page la signature est placée
 function detectSignaturePage() {
     if (!signaturePreview || !signatureOverlay) return 1;
-
     const sigRect = signaturePreview.getBoundingClientRect();
     const sigCenterY = sigRect.top + sigRect.height / 2;
 
     const pagesContainer = document.getElementById('pdf-pages-container');
     if (!pagesContainer) return 1;
 
-    const pageContainers = pagesContainer.querySelectorAll('.pdf-page-container');
-
-    for (let i = 0; i < pageContainers.length; i++) {
-        const pageContainer = pageContainers[i];
-        const pageRect = pageContainer.getBoundingClientRect();
-
-        // Vérifier si le centre de la signature est dans cette page
+    const pages = pagesContainer.querySelectorAll('.pdf-page-container');
+    for (const page of pages) {
+        const pageRect = page.getBoundingClientRect();
         if (sigCenterY >= pageRect.top && sigCenterY <= pageRect.bottom) {
-            state.signaturePage = parseInt(pageContainer.dataset.pageNumber);
-            console.log(`📝 Signature sur la page ${state.signaturePage}`);
+            state.signaturePage = parseInt(page.dataset.pageNumber);
             return state.signaturePage;
         }
     }
-
     return 1;
 }
 
-// Générer le PDF avec signature
+// ==============================================
+// PAGE SELECTOR
+// ==============================================
+function updatePageSelector() {
+    const panel = document.getElementById('page-selector-panel');
+    if (!panel) return;
+
+    if (state.totalPages > 1) {
+        panel.style.display = 'block';
+        buildCustomPageCheckboxes();
+    } else {
+        panel.style.display = 'none';
+    }
+}
+
+function buildCustomPageCheckboxes() {
+    const container = document.getElementById('custom-pages-container');
+    if (!container) return;
+    container.innerHTML = '';
+
+    for (let i = 1; i <= state.totalPages; i++) {
+        const label = document.createElement('label');
+        label.className = 'page-checkbox';
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = i;
+        checkbox.dataset.pageNum = i;
+        // Par defaut cocher la page actuelle
+        if (i === state.signaturePage) {
+            checkbox.checked = true;
+            label.classList.add('checked');
+        }
+
+        checkbox.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                label.classList.add('checked');
+            } else {
+                label.classList.remove('checked');
+            }
+            updateCustomPagesState();
+        });
+
+        const span = document.createElement('span');
+        span.textContent = `Page ${i}`;
+
+        label.appendChild(checkbox);
+        label.appendChild(span);
+        container.appendChild(label);
+    }
+
+    updateCustomPagesState();
+}
+
+function updateCustomPagesState() {
+    const container = document.getElementById('custom-pages-container');
+    if (!container) return;
+    const checked = container.querySelectorAll('input[type="checkbox"]:checked');
+    state.signatureCustomPages = Array.from(checked).map(cb => parseInt(cb.value));
+}
+
+function updateCurrentPageDisplay() {
+    const display = document.getElementById('current-page-display');
+    if (display) {
+        display.textContent = state.signaturePage;
+    }
+}
+
+// Event listeners pour les radio buttons du page selector
+document.querySelectorAll('input[name="sig-page-mode"]').forEach(radio => {
+    radio.addEventListener('change', (e) => {
+        state.signaturePageMode = e.target.value;
+        const customContainer = document.getElementById('custom-pages-container');
+        if (customContainer) {
+            customContainer.style.display = e.target.value === 'custom' ? 'flex' : 'none';
+        }
+    });
+});
+
+// Obtenir les pages cibles pour la signature
+function getSignatureTargetPages() {
+    switch (state.signaturePageMode) {
+        case 'all':
+            return Array.from({ length: state.totalPages }, (_, i) => i + 1);
+        case 'custom':
+            return state.signatureCustomPages.length > 0
+                ? state.signatureCustomPages
+                : [state.signaturePage];
+        case 'current':
+        default:
+            return [state.signaturePage];
+    }
+}
+
+// ==============================================
+// SAUVEGARDE AUTOMATIQUE (Supabase)
+// ==============================================
+async function saveSignatureToDatabase() {
+    if (!state.signatureData) return;
+    try {
+        localStorage.setItem('lastSignature', state.signatureData);
+        if (typeof saveSignatureTemplate === 'function') {
+            await saveSignatureTemplate('Signature', state.signatureData);
+        }
+    } catch (error) {
+        console.warn('Erreur sauvegarde signature:', error);
+    }
+}
+
+// ==============================================
+// CACHE LOCALSTORAGE (signature + paraphe + prefs)
+// ==============================================
+function saveToCache() {
+    try {
+        if (state.signatureData) {
+            localStorage.setItem('cachedSignature', state.signatureData);
+        } else {
+            localStorage.removeItem('cachedSignature');
+        }
+        if (state.parapheData) {
+            localStorage.setItem('cachedParaphe', state.parapheData);
+        } else {
+            localStorage.removeItem('cachedParaphe');
+        }
+        // Sauvegarder les preferences
+        localStorage.setItem('signaturePrefs', JSON.stringify({
+            signatureColor: colorInput.value,
+            signatureWidth: widthInput.value,
+            parapheColor: parapheColorInput ? parapheColorInput.value : '#000000',
+            parapheWidth: parapheWidthInput ? parapheWidthInput.value : '2',
+            signatureSize: currentSignatureWidth,
+            parapheSize: currentParapheSize
+        }));
+    } catch (error) {
+        console.warn('Erreur sauvegarde cache:', error);
+    }
+}
+
+function loadFromCache() {
+    try {
+        // Charger la signature
+        const cachedSig = localStorage.getItem('cachedSignature') || localStorage.getItem('lastSignature');
+        if (cachedSig) {
+            state.signatureData = cachedSig;
+            const img = new Image();
+            img.onload = () => {
+                ctx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
+                ctx.drawImage(img, 0, 0, signatureCanvas.width, signatureCanvas.height);
+            };
+            img.src = cachedSig;
+
+            // Afficher le badge
+            const badge = document.getElementById('cached-signature-badge');
+            if (badge) badge.style.display = 'inline-block';
+        }
+
+        // Charger le paraphe
+        const cachedParaphe = localStorage.getItem('cachedParaphe');
+        if (cachedParaphe && ctxParaphe) {
+            state.parapheData = cachedParaphe;
+            const img = new Image();
+            img.onload = () => {
+                ctxParaphe.clearRect(0, 0, parapheCanvas.width, parapheCanvas.height);
+                ctxParaphe.drawImage(img, 0, 0, parapheCanvas.width, parapheCanvas.height);
+            };
+            img.src = cachedParaphe;
+        }
+
+        // Charger les preferences
+        const prefsStr = localStorage.getItem('signaturePrefs');
+        if (prefsStr) {
+            const prefs = JSON.parse(prefsStr);
+            if (prefs.signatureColor) colorInput.value = prefs.signatureColor;
+            if (prefs.signatureWidth) widthInput.value = prefs.signatureWidth;
+            if (prefs.parapheColor && parapheColorInput) parapheColorInput.value = prefs.parapheColor;
+            if (prefs.parapheWidth && parapheWidthInput) parapheWidthInput.value = prefs.parapheWidth;
+            if (prefs.signatureSize) {
+                currentSignatureWidth = prefs.signatureSize;
+                if (signatureSizeSlider) signatureSizeSlider.value = currentSignatureWidth;
+                if (sizeValueDisplay) sizeValueDisplay.textContent = `${currentSignatureWidth}px`;
+            }
+            if (prefs.parapheSize) {
+                currentParapheSize = prefs.parapheSize;
+                if (parapheSizeSlider) parapheSizeSlider.value = currentParapheSize;
+                if (parapheSizeValue) parapheSizeValue.textContent = `${currentParapheSize}px`;
+            }
+        }
+
+        console.log('Cache charge:', cachedSig ? 'signature' : '-', cachedParaphe ? 'paraphe' : '-');
+    } catch (error) {
+        console.warn('Erreur chargement cache:', error);
+    }
+}
+
+// ==============================================
+// GENERATION DU PDF SIGNE
+// ==============================================
 downloadBtn.addEventListener('click', generateAndDownloadPDF);
 
 async function generateAndDownloadPDF() {
     if (!state.signatureData) {
-        alert('Veuillez créer une signature d\'abord!');
+        alert('Veuillez creer une signature d\'abord!');
         return;
     }
 
-    // Demander le nom du fichier à l'utilisateur
-    const fileName = prompt('Entrez le nom du fichier PDF:', 'document_signé');
+    const fileName = prompt('Nom du fichier PDF:', 'document_signe');
+    if (fileName === null) return;
 
-    // Si l'utilisateur annule, ne pas télécharger
-    if (fileName === null) {
-        return;
-    }
-
-    // Nettoyer le nom de fichier (retirer les caractères non valides)
-    const cleanFileName = fileName.trim() || 'document_signé';
+    const cleanFileName = fileName.trim() || 'document_signe';
     const finalFileName = cleanFileName.endsWith('.pdf') ? cleanFileName : `${cleanFileName}.pdf`;
 
     try {
+        showLoader();
         const pdfBytes = await createSignedPDF();
 
-        // Télécharger le PDF
         const blob = new Blob([pdfBytes], { type: 'application/pdf' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -1305,36 +1414,33 @@ async function generateAndDownloadPDF() {
         a.click();
         URL.revokeObjectURL(url);
 
-        alert('PDF téléchargé avec succès!');
+        alert('PDF telecharge avec succes!');
     } catch (error) {
-        console.error('Erreur lors de la génération du PDF:', error);
-        alert('Erreur lors de la génération du PDF: ' + error.message);
+        console.error('Erreur generation PDF:', error);
+        alert('Erreur lors de la generation du PDF: ' + error.message);
+    } finally {
+        hideLoader();
     }
 }
 
 async function createSignedPDF() {
     const { PDFDocument } = PDFLib;
-
     let pdfDoc;
 
     if (state.uploadedFileType === 'pdf') {
-        // Charger le PDF existant
         pdfDoc = await PDFDocument.load(state.originalPdfBytes);
     } else {
-        // Créer un nouveau PDF pour l'image
         pdfDoc = await PDFDocument.create();
         const page = pdfDoc.addPage([595, 842]); // A4
 
         if (state.uploadedFileType === 'image') {
             const imgData = await state.uploadedFile.arrayBuffer();
             let image;
-
             if (state.uploadedFile.type === 'image/png') {
                 image = await pdfDoc.embedPng(imgData);
             } else {
                 image = await pdfDoc.embedJpg(imgData);
             }
-
             const imgDims = image.scale(0.5);
             page.drawImage(image, {
                 x: 50,
@@ -1345,97 +1451,101 @@ async function createSignedPDF() {
         }
     }
 
-    // Récupérer toutes les pages
     const pages = pdfDoc.getPages();
 
-    // Convertir la signature en image PNG
+    // Embed signature
     const signatureImageBytes = await fetch(state.signatureData).then(res => res.arrayBuffer());
     const signatureImage = await pdfDoc.embedPng(signatureImageBytes);
 
-    // Détecter la page sur laquelle placer la signature
-    const targetPageNum = detectSignaturePage();
-    const targetPage = pages[targetPageNum - 1]; // Les pages sont indexées à partir de 0
-
-    // Calculer la position de la signature depuis la prévisualisation
+    // Calculer la position relative de la signature sur sa page de reference
+    const refPageNum = detectSignaturePage();
     const pagesContainer = document.getElementById('pdf-pages-container');
-    const targetPageContainer = pagesContainer ? pagesContainer.querySelector(`.pdf-page-container[data-page-number="${targetPageNum}"]`) : null;
-    const targetCanvas = targetPageContainer ? targetPageContainer.querySelector('.pdf-page-canvas') : documentPreview.querySelector('canvas');
+    const refPageContainer = pagesContainer ? pagesContainer.querySelector(`.pdf-page-container[data-page-number="${refPageNum}"]`) : null;
+    const refCanvas = refPageContainer ? refPageContainer.querySelector('.pdf-page-canvas') : documentPreview.querySelector('canvas, img');
 
-    const signatureLeft = parseFloat(signaturePreview.style.left) || 50;
-    const signatureTop = parseFloat(signaturePreview.style.top) || 50;
+    const sigLeft = parseFloat(signaturePreview.style.left) || 50;
+    const sigTop = parseFloat(signaturePreview.style.top) || 50;
 
-    let signatureX = 50;
-    let signatureY = 700;
+    // Calculer les fractions relatives a la page de reference
+    let fracX = 0.1, fracY = 0.5, fracW = 0.25;
 
-    if (targetCanvas) {
-        const canvasRect = targetCanvas.getBoundingClientRect();
+    if (refCanvas) {
+        const canvasRect = refCanvas.getBoundingClientRect();
         const containerRect = documentPreview.getBoundingClientRect();
         const sigRect = signaturePreview.getBoundingClientRect();
 
-        // Position de la signature relative au canvas de la page
-        const relativeLeft = signatureLeft - (canvasRect.left - containerRect.left);
-        const relativeTop = signatureTop - (canvasRect.top - containerRect.top);
+        const canvasRelLeft = canvasRect.left - containerRect.left;
+        const canvasRelTop = canvasRect.top - containerRect.top;
 
-        // Convertir en coordonnées PDF (A4: 595x842 points)
-        signatureX = Math.round((relativeLeft / canvasRect.width) * 595);
-        signatureY = Math.round(842 - ((relativeTop + sigRect.height) / canvasRect.height) * 842);
+        fracX = (sigLeft - canvasRelLeft) / canvasRect.width;
+        fracY = (sigTop - canvasRelTop) / canvasRect.height;
+        fracW = sigRect.width / canvasRect.width;
     }
 
-    // Utiliser la taille actuelle (du slider)
-    const signatureDims = signatureImage.scale(currentSignatureWidth / signatureImage.width);
+    // Obtenir les pages cibles
+    const targetPages = getSignatureTargetPages();
 
-    // Ajouter la signature sur la page cible
-    console.log(`✍️ Ajout de la signature sur la page ${targetPageNum}`);
-    targetPage.drawImage(signatureImage, {
-        x: signatureX,
-        y: signatureY,
-        width: signatureDims.width,
-        height: signatureDims.height
+    // Appliquer la signature sur chaque page cible
+    targetPages.forEach(pageNum => {
+        if (pageNum < 1 || pageNum > pages.length) return;
+        const page = pages[pageNum - 1];
+        const { width: pw, height: ph } = page.getSize();
+
+        const sigW = fracW * pw;
+        const sigH = sigW * (signatureImage.height / signatureImage.width);
+        const sigX = fracX * pw;
+        // Convertir Y du repere top-left (HTML) vers bottom-left (PDF)
+        const sigY = ph - (fracY * ph) - sigH;
+
+        page.drawImage(signatureImage, {
+            x: sigX,
+            y: sigY,
+            width: sigW,
+            height: sigH
+        });
     });
 
-    // Ajouter le paraphe sur toutes les pages si défini
+    // Ajouter le paraphe sur toutes les pages
     if (state.parapheData) {
         const parapheImageBytes = await fetch(state.parapheData).then(res => res.arrayBuffer());
         const parapheImage = await pdfDoc.embedPng(parapheImageBytes);
 
-        // Récupérer la position du paraphe depuis la page où il a été placé
-        const paraphePreview = document.getElementById('paraphe-preview');
-        const parapheLeft = parseFloat(paraphePreview?.style.left || 50);
-        const parapheTop = parseFloat(paraphePreview?.style.top || 50);
+        const parapheEl = document.getElementById('paraphe-preview');
+        const parapheLeft = parseFloat(parapheEl?.style.left || '50');
+        const parapheTop = parseFloat(parapheEl?.style.top || '50');
 
-        // Détecter la page sur laquelle le paraphe a été placé
         const paraphePageNum = detectParaphePage();
-        const paraphePageContainer = document.querySelector(`.pdf-page-container[data-page-number="${paraphePageNum}"]`);
-        const parapheCanvas = paraphePageContainer ? paraphePageContainer.querySelector('.pdf-page-canvas') : documentPreview.querySelector('canvas');
+        const paraphePageContainer = pagesContainer ? pagesContainer.querySelector(`.pdf-page-container[data-page-number="${paraphePageNum}"]`) : null;
+        const parapheCanvas = paraphePageContainer ? paraphePageContainer.querySelector('.pdf-page-canvas') : documentPreview.querySelector('canvas, img');
 
-        let parapheX = 50;
-        let parapheY = 50;
+        let pFracX = 0.7, pFracY = 0.9, pFracW = 0.15;
 
         if (parapheCanvas) {
             const canvasRect = parapheCanvas.getBoundingClientRect();
             const containerRect = documentPreview.getBoundingClientRect();
-            const parapheRect = paraphePreview.getBoundingClientRect();
+            const parapheRect = parapheEl.getBoundingClientRect();
 
-            // Position du paraphe relative au canvas de la page
-            const relativeLeft = parapheLeft - (canvasRect.left - containerRect.left);
-            const relativeTop = parapheTop - (canvasRect.top - containerRect.top);
+            const canvasRelLeft = canvasRect.left - containerRect.left;
+            const canvasRelTop = canvasRect.top - containerRect.top;
 
-            // Convertir en coordonnées PDF (A4: 595x842 points)
-            parapheX = Math.round((relativeLeft / canvasRect.width) * 595);
-            parapheY = Math.round(842 - ((relativeTop + parapheRect.height) / canvasRect.height) * 842);
+            pFracX = (parapheLeft - canvasRelLeft) / canvasRect.width;
+            pFracY = (parapheTop - canvasRelTop) / canvasRect.height;
+            pFracW = parapheRect.width / canvasRect.width;
         }
 
-        // Utiliser la taille actuelle du paraphe
-        const parapheDims = parapheImage.scale(currentParapheSize / parapheImage.width);
+        // Appliquer le paraphe sur toutes les pages
+        pages.forEach((page) => {
+            const { width: pw, height: ph } = page.getSize();
+            const parW = pFracW * pw;
+            const parH = parW * (parapheImage.height / parapheImage.width);
+            const parX = pFracX * pw;
+            const parY = ph - (pFracY * ph) - parH;
 
-        // Appliquer le paraphe à la même position sur toutes les pages
-        console.log(`✍️ Ajout du paraphe à (${parapheX}, ${parapheY}) sur toutes les pages`);
-        pages.forEach((page, index) => {
             page.drawImage(parapheImage, {
-                x: parapheX,
-                y: parapheY,
-                width: parapheDims.width,
-                height: parapheDims.height
+                x: parX,
+                y: parY,
+                width: parW,
+                height: parH
             });
         });
     }
@@ -1443,7 +1553,9 @@ async function createSignedPDF() {
     return await pdfDoc.save();
 }
 
-// Gestion de l'email
+// ==============================================
+// EMAIL
+// ==============================================
 emailBtn.addEventListener('click', () => {
     emailForm.style.display = 'block';
 });
@@ -1466,7 +1578,7 @@ sendEmailBtn.addEventListener('click', async () => {
     }
 
     if (!state.signatureData) {
-        statusDiv.textContent = 'Veuillez créer une signature d\'abord';
+        statusDiv.textContent = 'Veuillez creer une signature d\'abord';
         statusDiv.className = 'status-message error';
         return;
     }
@@ -1478,16 +1590,13 @@ sendEmailBtn.addEventListener('click', async () => {
         const pdfBytes = await createSignedPDF();
         const pdfBase64 = btoa(String.fromCharCode(...new Uint8Array(pdfBytes)));
 
-        // Utiliser l'API relative pour Vercel (fonctionne aussi en local avec server.js)
         const apiUrl = window.location.hostname === 'localhost'
             ? 'http://localhost:3000/send-email'
             : '/api/send-email';
 
         const response = await fetch(apiUrl, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 to: recipientEmail,
                 subject: subject,
@@ -1499,7 +1608,7 @@ sendEmailBtn.addEventListener('click', async () => {
         const result = await response.json();
 
         if (result.success) {
-            statusDiv.textContent = 'Email envoyé avec succès!';
+            statusDiv.textContent = 'Email envoye avec succes!';
             statusDiv.className = 'status-message success';
             setTimeout(() => {
                 emailForm.style.display = 'none';
@@ -1510,8 +1619,15 @@ sendEmailBtn.addEventListener('click', async () => {
             statusDiv.className = 'status-message error';
         }
     } catch (error) {
-        console.error('Erreur lors de l\'envoi de l\'email:', error);
-        statusDiv.textContent = 'Erreur lors de l\'envoi de l\'email. Assurez-vous que le serveur est démarré.';
+        console.error('Erreur envoi email:', error);
+        statusDiv.textContent = 'Erreur lors de l\'envoi. Verifiez que le serveur est demarre.';
         statusDiv.className = 'status-message error';
     }
+});
+
+// ==============================================
+// INITIALISATION
+// ==============================================
+window.addEventListener('DOMContentLoaded', () => {
+    loadFromCache();
 });
