@@ -15,59 +15,94 @@
 
     <div class="container">
         <header>
-            <h1>📝 Signature de Documents</h1>
-            <p>Téléchargez un document, ajoutez votre signature et envoyez-le par email ou téléchargez-le en PDF</p>
+            <h1>Signature de Documents</h1>
+            <p>Chargez un document, ajoutez votre signature et envoyez-le par email ou PDF</p>
         </header>
 
         <main>
             <!-- Section 1: Upload de document -->
             <section class="card" id="upload-section">
-                <h2>1. Télécharger un document</h2>
+                <div class="section-header">
+                    <h2>1. Charger un document</h2>
+                    <span id="cached-signature-badge" class="badge badge-success" style="display: none;">
+                        Signature sauvegardee
+                    </span>
+                </div>
                 <div class="upload-area" id="drop-zone">
                     <input type="file" id="file-input" accept=".pdf,image/*" hidden>
                     <div class="drop-zone-content">
                         <div class="drop-icon">📄</div>
-                        <p class="drop-text">Glissez-déposez un document ici</p>
+                        <p class="drop-text">Glissez-deposez un document ici</p>
                         <p class="drop-text-or">ou</p>
                         <button class="btn btn-primary" onclick="document.getElementById('file-input').click()">
-                            📁 Choisir un fichier
+                            Choisir un fichier
                         </button>
                         <p class="file-info" id="file-info">PDF ou Image (JPG, PNG)</p>
                     </div>
                 </div>
-                <div id="document-preview" class="document-preview">
-                    <!-- Zone interactive pour positionner la signature -->
-                    <div id="signature-overlay" class="signature-overlay" style="display: none;">
-                        <img id="signature-preview" class="signature-draggable" alt="Signature">
-                        <div class="signature-hint">🖱️ Glissez pour positionner</div>
+
+                <!-- Toolbar document -->
+                <div id="doc-toolbar" class="doc-toolbar" style="display: none;">
+                    <div class="toolbar-left">
+                        <span id="page-info-display" class="page-info"></span>
                     </div>
-                    <!-- Zone interactive pour positionner le paraphe -->
-                    <div id="paraphe-overlay" class="signature-overlay" style="display: none;">
-                        <img id="paraphe-preview" class="signature-draggable paraphe-draggable" alt="Paraphe">
-                        <div class="signature-hint">🖱️ Glissez pour positionner le paraphe</div>
+                    <div class="toolbar-right">
+                        <button class="btn btn-secondary btn-sm" id="new-doc-btn">Nouveau document</button>
                     </div>
                 </div>
 
-                <!-- Contrôle de taille de la signature -->
+                <!-- Apercu du document -->
+                <div id="document-preview" class="document-preview">
+                    <div id="signature-overlay" class="signature-overlay" style="display: none;">
+                        <img id="signature-preview" class="signature-draggable" alt="Signature">
+                        <div class="signature-hint">Glissez pour positionner</div>
+                    </div>
+                    <div id="paraphe-overlay" class="signature-overlay" style="display: none;">
+                        <img id="paraphe-preview" class="signature-draggable paraphe-draggable" alt="Paraphe">
+                        <div class="signature-hint">Glissez pour positionner le paraphe</div>
+                    </div>
+                </div>
+
+                <!-- Controle de taille de la signature -->
                 <div id="signature-size-control" class="signature-size-control" style="display: none;">
                     <label for="signature-size-slider">
-                        📏 Taille de la signature: <span id="size-value-display">150px</span>
+                        Taille de la signature: <span id="size-value-display">150px</span>
                     </label>
                     <input type="range" id="signature-size-slider" min="50" max="400" value="150" step="5">
+                </div>
+
+                <!-- Selecteur de pages pour la signature -->
+                <div id="page-selector-panel" class="page-selector-panel" style="display: none;">
+                    <h3>Placement de la signature</h3>
+                    <div class="page-selector-options">
+                        <label class="radio-option">
+                            <input type="radio" name="sig-page-mode" value="current" checked>
+                            <span>Page actuelle (<span id="current-page-display">1</span>)</span>
+                        </label>
+                        <label class="radio-option">
+                            <input type="radio" name="sig-page-mode" value="all">
+                            <span>Toutes les pages</span>
+                        </label>
+                        <label class="radio-option">
+                            <input type="radio" name="sig-page-mode" value="custom">
+                            <span>Pages specifiques</span>
+                        </label>
+                    </div>
+                    <div id="custom-pages-container" class="custom-pages-container" style="display: none;">
+                    </div>
                 </div>
             </section>
 
             <!-- Section 2: Signature -->
             <section class="card" id="signature-section" style="display: none;">
-                <h2>2. Créer votre signature</h2>
+                <h2>2. Votre signature</h2>
                 <div class="signature-controls">
                     <label for="signature-color">Couleur:</label>
                     <input type="color" id="signature-color" value="#000000">
-
-                    <label for="signature-width">Épaisseur:</label>
+                    <label for="signature-width">Epaisseur:</label>
                     <input type="range" id="signature-width" min="1" max="10" value="3">
-
-                    <button class="btn btn-secondary" id="clear-signature">🗑️ Effacer</button>
+                    <button class="btn btn-secondary btn-sm" id="undo-signature">Annuler</button>
+                    <button class="btn btn-secondary btn-sm" id="clear-signature">Effacer</button>
                 </div>
                 <canvas id="signature-canvas" width="600" height="200"></canvas>
                 <p class="hint">Dessinez votre signature ci-dessus</p>
@@ -75,24 +110,20 @@
 
             <!-- Section 3: Paraphe -->
             <section class="card" id="paraphe-section" style="display: none;">
-                <h2>3. Créer votre paraphe (optionnel)</h2>
-                <p class="hint">Placez le paraphe manuellement sur le document (il sera automatiquement copié sur toutes les pages)</p>
+                <h2>3. Votre paraphe (optionnel)</h2>
+                <p class="hint">Le paraphe sera copie sur toutes les pages automatiquement</p>
                 <div class="signature-controls">
                     <label for="paraphe-color">Couleur:</label>
                     <input type="color" id="paraphe-color" value="#000000">
-
-                    <label for="paraphe-width">Épaisseur:</label>
+                    <label for="paraphe-width">Epaisseur:</label>
                     <input type="range" id="paraphe-width" min="1" max="10" value="2">
-
-                    <button class="btn btn-secondary" id="clear-paraphe">🗑️ Effacer</button>
+                    <button class="btn btn-secondary btn-sm" id="undo-paraphe">Annuler</button>
+                    <button class="btn btn-secondary btn-sm" id="clear-paraphe">Effacer</button>
                 </div>
                 <canvas id="paraphe-canvas" width="400" height="150"></canvas>
-                <p class="hint">Dessinez votre paraphe ci-dessus</p>
-
-                <!-- Contrôle de taille du paraphe -->
                 <div class="paraphe-controls">
                     <label>
-                        📏 Taille: <span id="paraphe-size-value">80px</span>
+                        Taille: <span id="paraphe-size-value">80px</span>
                         <input type="range" id="paraphe-size" min="30" max="150" value="80" step="5">
                     </label>
                 </div>
@@ -100,21 +131,15 @@
 
             <!-- Section 4: Actions -->
             <section class="card" id="actions-section" style="display: none;">
-                <h2>4. Envoyer ou télécharger</h2>
+                <h2>4. Envoyer ou telecharger</h2>
                 <div class="actions">
-                    <button class="btn btn-success" id="download-btn">
-                        ⬇️ Télécharger le PDF
-                    </button>
-                    <button class="btn btn-info" id="email-btn">
-                        📧 Envoyer par Email
-                    </button>
+                    <button class="btn btn-success" id="download-btn">Telecharger le PDF</button>
+                    <button class="btn btn-info" id="email-btn">Envoyer par Email</button>
                 </div>
-
-                <!-- Formulaire d'email (caché initialement) -->
                 <div id="email-form" class="email-form" style="display: none;">
                     <h3>Envoyer par email</h3>
                     <input type="email" id="recipient-email" placeholder="Email du destinataire" required>
-                    <input type="text" id="email-subject" placeholder="Sujet" value="Document signé">
+                    <input type="text" id="email-subject" placeholder="Sujet" value="Document signe">
                     <textarea id="email-message" placeholder="Message (optionnel)" rows="4"></textarea>
                     <div class="form-actions">
                         <button class="btn btn-primary" id="send-email-btn">Envoyer</button>
@@ -126,7 +151,7 @@
         </main>
 
         <footer>
-            <p>© 2025 Application de Signature de Documents</p>
+            <p>&copy; 2025 Application de Signature de Documents</p>
         </footer>
     </div>
 
