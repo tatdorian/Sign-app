@@ -64,18 +64,31 @@ if (ctxParaphe) {
 }
 
 // ==============================================
+// DETECTION MOBILE
+// ==============================================
+function isMobile() {
+    return window.innerWidth <= 768 || ('ontouchstart' in window);
+}
+
+function isPhone() {
+    return window.innerWidth <= 480;
+}
+
+// ==============================================
 // CANVAS RESPONSIVE
 // ==============================================
+let resizeTimeout;
 function resizeCanvas() {
-    const isMobile = window.innerWidth <= 768;
-    if (isMobile) {
-        const container = signatureCanvas.parentElement;
-        const containerWidth = container.clientWidth - 40;
-        signatureCanvas.width = containerWidth;
-        signatureCanvas.height = 300;
+    const container = signatureCanvas.parentElement;
+    if (!container) return;
+    const containerWidth = container.clientWidth - (isPhone() ? 28 : 40);
+
+    if (isMobile()) {
+        signatureCanvas.width = Math.max(200, containerWidth);
+        signatureCanvas.height = isPhone() ? 180 : 200;
         if (parapheCanvas) {
-            parapheCanvas.width = containerWidth;
-            parapheCanvas.height = 200;
+            parapheCanvas.width = Math.max(200, containerWidth);
+            parapheCanvas.height = isPhone() ? 130 : 150;
         }
     } else {
         signatureCanvas.width = 600;
@@ -85,6 +98,7 @@ function resizeCanvas() {
             parapheCanvas.height = 150;
         }
     }
+
     // Reconfigurer apres resize
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
@@ -92,6 +106,7 @@ function resizeCanvas() {
         ctxParaphe.lineJoin = 'round';
         ctxParaphe.lineCap = 'round';
     }
+
     // Redessiner la signature si elle existe
     if (state.signatureData) {
         const img = new Image();
@@ -107,10 +122,25 @@ function resizeCanvas() {
         };
         img.src = state.parapheData;
     }
+
+    // Adapter la taille par defaut de la signature sur mobile
+    if (isPhone() && currentSignatureWidth > 120) {
+        currentSignatureWidth = 100;
+        if (signatureSizeSlider) signatureSizeSlider.value = currentSignatureWidth;
+        if (sizeValueDisplay) sizeValueDisplay.textContent = `${currentSignatureWidth}px`;
+    }
 }
 
 window.addEventListener('load', resizeCanvas);
-window.addEventListener('resize', resizeCanvas);
+window.addEventListener('resize', () => {
+    clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(resizeCanvas, 150);
+});
+
+// Gestion changement d'orientation
+window.addEventListener('orientationchange', () => {
+    setTimeout(resizeCanvas, 300);
+});
 
 // ==============================================
 // UPLOAD DE FICHIER
@@ -459,7 +489,8 @@ signatureCanvas.addEventListener('mouseout', stopDrawing);
 
 signatureCanvas.addEventListener('touchstart', (e) => {
     e.preventDefault();
-    // Sauvegarder l'etat avant le trait
+    // Empecher le scroll pendant le dessin
+    document.body.classList.add('drawing-active');
     state.signatureHistory.push(signatureCanvas.toDataURL());
     const touch = e.touches[0];
     const rect = signatureCanvas.getBoundingClientRect();
@@ -468,7 +499,7 @@ signatureCanvas.addEventListener('touchstart', (e) => {
     lastX = (touch.clientX - rect.left) * scaleX;
     lastY = (touch.clientY - rect.top) * scaleY;
     state.isDrawing = true;
-});
+}, { passive: false });
 
 signatureCanvas.addEventListener('touchmove', (e) => {
     e.preventDefault();
@@ -481,22 +512,23 @@ signatureCanvas.addEventListener('touchmove', (e) => {
     const y = (touch.clientY - rect.top) * scaleY;
 
     ctx.strokeStyle = colorInput.value;
-    ctx.lineWidth = widthInput.value;
+    ctx.lineWidth = isMobile() ? Math.max(parseInt(widthInput.value), 2) : widthInput.value;
     ctx.beginPath();
     ctx.moveTo(lastX, lastY);
     ctx.lineTo(x, y);
     ctx.stroke();
     lastX = x;
     lastY = y;
-});
+}, { passive: false });
 
 signatureCanvas.addEventListener('touchend', (e) => {
     e.preventDefault();
+    document.body.classList.remove('drawing-active');
     state.isDrawing = false;
     state.signatureData = signatureCanvas.toDataURL();
     saveToCache();
     showSignatureOnDocument();
-});
+}, { passive: false });
 
 function startDrawing(e) {
     // Sauvegarder l'etat avant le trait pour undo
@@ -614,6 +646,8 @@ if (parapheCanvas) {
 
     parapheCanvas.addEventListener('touchstart', (e) => {
         e.preventDefault();
+        // Empecher le scroll pendant le dessin
+        document.body.classList.add('drawing-active');
         state.parapheHistory.push(parapheCanvas.toDataURL());
         const touch = e.touches[0];
         const rect = parapheCanvas.getBoundingClientRect();
@@ -622,7 +656,7 @@ if (parapheCanvas) {
         lastXParaphe = (touch.clientX - rect.left) * scaleX;
         lastYParaphe = (touch.clientY - rect.top) * scaleY;
         state.isDrawingParaphe = true;
-    });
+    }, { passive: false });
 
     parapheCanvas.addEventListener('touchmove', (e) => {
         e.preventDefault();
@@ -635,22 +669,23 @@ if (parapheCanvas) {
         const y = (touch.clientY - rect.top) * scaleY;
 
         ctxParaphe.strokeStyle = parapheColorInput.value;
-        ctxParaphe.lineWidth = parapheWidthInput.value;
+        ctxParaphe.lineWidth = isMobile() ? Math.max(parseInt(parapheWidthInput.value), 2) : parapheWidthInput.value;
         ctxParaphe.beginPath();
         ctxParaphe.moveTo(lastXParaphe, lastYParaphe);
         ctxParaphe.lineTo(x, y);
         ctxParaphe.stroke();
         lastXParaphe = x;
         lastYParaphe = y;
-    });
+    }, { passive: false });
 
     parapheCanvas.addEventListener('touchend', (e) => {
         e.preventDefault();
+        document.body.classList.remove('drawing-active');
         state.isDrawingParaphe = false;
         state.parapheData = parapheCanvas.toDataURL();
         saveToCache();
         showParapheOnDocument();
-    });
+    }, { passive: false });
 }
 
 function startDrawingParaphe(e) {

@@ -2,21 +2,23 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Application de Signature de Documents</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>Signature de Documents</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <!-- Barre de chargement -->
     <div id="loading-overlay" class="loading-overlay" style="display: none;">
         <div class="loading-spinner"></div>
-        <p class="loading-text">Chargement du document...</p>
+        <p class="loading-text">Chargement...</p>
     </div>
 
     <div class="container">
         <header>
             <h1>Signature de Documents</h1>
-            <p>Chargez un document, ajoutez votre signature et envoyez-le par email ou PDF</p>
+            <p class="header-subtitle">Signez vos documents et envoyez-les</p>
         </header>
 
         <main>
@@ -25,15 +27,16 @@
                 <div class="section-header">
                     <h2>1. Charger un document</h2>
                     <span id="cached-signature-badge" class="badge badge-success" style="display: none;">
-                        Signature sauvegardee
+                        Signature prete
                     </span>
                 </div>
                 <div class="upload-area" id="drop-zone">
                     <input type="file" id="file-input" accept=".pdf,image/*" hidden>
                     <div class="drop-zone-content">
                         <div class="drop-icon">📄</div>
-                        <p class="drop-text">Glissez-deposez un document ici</p>
-                        <p class="drop-text-or">ou</p>
+                        <p class="drop-text drop-text-desktop">Glissez-deposez un document ici</p>
+                        <p class="drop-text drop-text-mobile">Appuyez pour choisir un document</p>
+                        <p class="drop-text-or drop-text-desktop">ou</p>
                         <button class="btn btn-primary" onclick="document.getElementById('file-input').click()">
                             Choisir un fichier
                         </button>
@@ -97,12 +100,20 @@
             <section class="card" id="signature-section" style="display: none;">
                 <h2>2. Votre signature</h2>
                 <div class="signature-controls">
-                    <label for="signature-color">Couleur:</label>
-                    <input type="color" id="signature-color" value="#000000">
-                    <label for="signature-width">Epaisseur:</label>
-                    <input type="range" id="signature-width" min="1" max="10" value="3">
-                    <button class="btn btn-secondary btn-sm" id="undo-signature">Annuler</button>
-                    <button class="btn btn-secondary btn-sm" id="clear-signature">Effacer</button>
+                    <div class="controls-row">
+                        <label class="control-group">
+                            <span>Couleur</span>
+                            <input type="color" id="signature-color" value="#000000">
+                        </label>
+                        <label class="control-group">
+                            <span>Epaisseur</span>
+                            <input type="range" id="signature-width" min="1" max="10" value="3">
+                        </label>
+                    </div>
+                    <div class="controls-row controls-buttons">
+                        <button class="btn btn-secondary btn-sm" id="undo-signature">Annuler</button>
+                        <button class="btn btn-secondary btn-sm" id="clear-signature">Effacer</button>
+                    </div>
                 </div>
                 <canvas id="signature-canvas" width="600" height="200"></canvas>
                 <p class="hint">Dessinez votre signature ci-dessus</p>
@@ -110,15 +121,23 @@
 
             <!-- Section 3: Paraphe -->
             <section class="card" id="paraphe-section" style="display: none;">
-                <h2>3. Votre paraphe (optionnel)</h2>
-                <p class="hint">Le paraphe sera copie sur toutes les pages automatiquement</p>
+                <h2>3. Paraphe (optionnel)</h2>
+                <p class="hint">Copie auto sur toutes les pages</p>
                 <div class="signature-controls">
-                    <label for="paraphe-color">Couleur:</label>
-                    <input type="color" id="paraphe-color" value="#000000">
-                    <label for="paraphe-width">Epaisseur:</label>
-                    <input type="range" id="paraphe-width" min="1" max="10" value="2">
-                    <button class="btn btn-secondary btn-sm" id="undo-paraphe">Annuler</button>
-                    <button class="btn btn-secondary btn-sm" id="clear-paraphe">Effacer</button>
+                    <div class="controls-row">
+                        <label class="control-group">
+                            <span>Couleur</span>
+                            <input type="color" id="paraphe-color" value="#000000">
+                        </label>
+                        <label class="control-group">
+                            <span>Epaisseur</span>
+                            <input type="range" id="paraphe-width" min="1" max="10" value="2">
+                        </label>
+                    </div>
+                    <div class="controls-row controls-buttons">
+                        <button class="btn btn-secondary btn-sm" id="undo-paraphe">Annuler</button>
+                        <button class="btn btn-secondary btn-sm" id="clear-paraphe">Effacer</button>
+                    </div>
                 </div>
                 <canvas id="paraphe-canvas" width="400" height="150"></canvas>
                 <div class="paraphe-controls">
@@ -140,7 +159,7 @@
                     <h3>Envoyer par email</h3>
                     <input type="email" id="recipient-email" placeholder="Email du destinataire" required>
                     <input type="text" id="email-subject" placeholder="Sujet" value="Document signe">
-                    <textarea id="email-message" placeholder="Message (optionnel)" rows="4"></textarea>
+                    <textarea id="email-message" placeholder="Message (optionnel)" rows="3"></textarea>
                     <div class="form-actions">
                         <button class="btn btn-primary" id="send-email-btn">Envoyer</button>
                         <button class="btn btn-secondary" id="cancel-email-btn">Annuler</button>
@@ -151,7 +170,7 @@
         </main>
 
         <footer>
-            <p>&copy; 2025 Application de Signature de Documents</p>
+            <p>&copy; 2025 Signature de Documents</p>
         </footer>
     </div>
 
