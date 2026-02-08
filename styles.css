@@ -2,9 +2,12 @@
     margin: 0;
     padding: 0;
     box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
 }
 
-/* Barre de chargement */
+/* =============================================
+   LOADING OVERLAY
+   ============================================= */
 .loading-overlay {
     position: fixed;
     top: 0;
@@ -20,10 +23,10 @@
 }
 
 .loading-spinner {
-    width: 60px;
-    height: 60px;
-    border: 5px solid rgba(255, 255, 255, 0.3);
-    border-top: 5px solid white;
+    width: 50px;
+    height: 50px;
+    border: 4px solid rgba(255, 255, 255, 0.3);
+    border-top: 4px solid white;
     border-radius: 50%;
     animation: spin 1s linear infinite;
 }
@@ -35,42 +38,51 @@
 
 .loading-text {
     color: white;
-    font-size: 18px;
-    margin-top: 20px;
+    font-size: 16px;
+    margin-top: 16px;
     font-weight: 500;
 }
 
+/* =============================================
+   BASE
+   ============================================= */
 body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     min-height: 100vh;
-    padding: 20px;
+    min-height: -webkit-fill-available;
+    padding: 16px;
+    padding: env(safe-area-inset-top, 16px) env(safe-area-inset-right, 16px) env(safe-area-inset-bottom, 16px) env(safe-area-inset-left, 16px);
 }
 
 .container {
     max-width: 960px;
     margin: 0 auto;
     background: white;
-    border-radius: 20px;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    border-radius: 16px;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.25);
     overflow: hidden;
 }
 
+/* =============================================
+   HEADER
+   ============================================= */
 header {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
-    padding: 40px 30px;
+    padding: 32px 24px;
     text-align: center;
 }
 
 header h1 {
-    font-size: 2.5em;
-    margin-bottom: 10px;
+    font-size: 2em;
+    margin-bottom: 6px;
+    line-height: 1.2;
 }
 
-header p {
-    font-size: 1.1em;
-    opacity: 0.9;
+.header-subtitle {
+    font-size: 1em;
+    opacity: 0.85;
 }
 
 /* Barre utilisateur */
@@ -78,50 +90,50 @@ header p {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-top: 20px;
-    padding-top: 20px;
+    margin-top: 16px;
+    padding-top: 16px;
     border-top: 1px solid rgba(255, 255, 255, 0.3);
+    flex-wrap: wrap;
+    gap: 10px;
 }
 
 .user-info {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
 }
 
 .user-icon {
-    font-size: 1.5em;
+    font-size: 1.3em;
     background: rgba(255, 255, 255, 0.2);
-    padding: 8px 12px;
+    padding: 6px 10px;
     border-radius: 50%;
 }
 
 .user-name {
     font-weight: 600;
-    font-size: 1.1em;
+    font-size: 1em;
 }
 
+/* =============================================
+   MAIN CONTENT
+   ============================================= */
 main {
-    padding: 30px;
+    padding: 24px;
 }
 
 .card {
     background: #f8f9fa;
-    border-radius: 15px;
-    padding: 25px;
-    margin-bottom: 25px;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    transition: transform 0.3s ease;
-}
-
-.card:hover {
-    transform: translateY(-2px);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
 .card h2 {
     color: #667eea;
-    margin-bottom: 20px;
-    font-size: 1.5em;
+    margin-bottom: 16px;
+    font-size: 1.3em;
 }
 
 /* Section header avec badge */
@@ -129,9 +141,9 @@ main {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 20px;
+    margin-bottom: 16px;
     flex-wrap: wrap;
-    gap: 10px;
+    gap: 8px;
 }
 
 .section-header h2 {
@@ -141,10 +153,11 @@ main {
 /* Badge */
 .badge {
     display: inline-block;
-    padding: 6px 14px;
+    padding: 5px 12px;
     border-radius: 20px;
-    font-size: 0.85em;
+    font-size: 0.8em;
     font-weight: 600;
+    white-space: nowrap;
 }
 
 .badge-success {
@@ -152,12 +165,14 @@ main {
     color: #155724;
 }
 
-/* Zone de drag & drop */
+/* =============================================
+   UPLOAD AREA
+   ============================================= */
 .upload-area {
     text-align: center;
-    padding: 40px;
+    padding: 32px 20px;
     border: 3px dashed #667eea;
-    border-radius: 15px;
+    border-radius: 12px;
     background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
     transition: all 0.3s ease;
     cursor: pointer;
@@ -166,13 +181,11 @@ main {
 .upload-area:hover {
     border-color: #764ba2;
     background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
-    transform: scale(1.01);
 }
 
 .upload-area.dragover {
     border-color: #28a745;
     background: linear-gradient(135deg, rgba(40, 167, 69, 0.15) 0%, rgba(40, 167, 69, 0.1) 100%);
-    transform: scale(1.02);
 }
 
 .drop-zone-content {
@@ -180,80 +193,94 @@ main {
 }
 
 .drop-icon {
-    font-size: 4em;
-    margin-bottom: 15px;
+    font-size: 3em;
+    margin-bottom: 12px;
     animation: float 3s ease-in-out infinite;
 }
 
 @keyframes float {
     0%, 100% { transform: translateY(0px); }
-    50% { transform: translateY(-10px); }
+    50% { transform: translateY(-8px); }
 }
 
 .drop-text {
-    font-size: 1.2em;
+    font-size: 1.1em;
     font-weight: 600;
     color: #667eea;
-    margin: 10px 0;
+    margin: 8px 0;
 }
+
+/* Mobile: cacher drag-drop, montrer texte tactile */
+.drop-text-mobile { display: none; }
+.drop-text-desktop { display: block; }
 
 .drop-text-or {
     color: #999;
-    margin: 15px 0;
+    margin: 12px 0;
     font-size: 0.9em;
 }
 
 .file-info {
-    margin-top: 15px;
+    margin-top: 12px;
     color: #666;
-    font-size: 0.9em;
+    font-size: 0.85em;
 }
 
-/* Toolbar document */
+/* =============================================
+   TOOLBAR DOCUMENT
+   ============================================= */
 .doc-toolbar {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-top: 15px;
-    padding: 12px 18px;
+    margin-top: 12px;
+    padding: 10px 14px;
     background: white;
     border-radius: 10px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
     flex-wrap: wrap;
-    gap: 10px;
+    gap: 8px;
 }
 
 .toolbar-left, .toolbar-right {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
 }
 
 .page-info {
     font-weight: 600;
     color: #667eea;
-    font-size: 0.95em;
+    font-size: 0.9em;
+}
+
+/* =============================================
+   BUTTONS
+   ============================================= */
+.btn {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-weight: 600;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    -webkit-appearance: none;
+}
+
+.btn:active {
+    transform: scale(0.97);
+    opacity: 0.9;
 }
 
 .btn-sm {
-    padding: 6px 14px;
-    font-size: 0.85em;
-}
-
-/* Boutons */
-.btn {
-    padding: 12px 30px;
-    border: none;
-    border-radius: 8px;
-    font-size: 1em;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    font-weight: 600;
-}
-
-.btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+    padding: 8px 16px;
+    font-size: 14px;
+    min-height: 40px;
 }
 
 .btn-primary {
@@ -276,25 +303,41 @@ main {
     color: white;
 }
 
-/* Apercu du document */
+/* Desktop hover */
+@media (hover: hover) {
+    .btn:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+
+    .card:hover {
+        transform: translateY(-1px);
+    }
+
+    .upload-area:hover {
+        transform: scale(1.005);
+    }
+}
+
+/* =============================================
+   DOCUMENT PREVIEW
+   ============================================= */
 .document-preview {
-    margin-top: 20px;
+    margin-top: 16px;
     text-align: center;
     position: relative;
     overflow: hidden;
 }
 
-/* Conteneur des pages PDF */
 .pdf-pages-container {
     display: flex;
     flex-direction: column;
-    gap: 30px;
+    gap: 24px;
     align-items: center;
 }
 
 .pdf-page-container {
     position: relative;
-    margin-bottom: 20px;
     max-width: 100%;
 }
 
@@ -302,30 +345,39 @@ main {
     max-width: 100%;
     height: auto;
     border: 2px solid #ddd;
-    border-radius: 10px;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     display: block;
 }
 
 .page-label {
     text-align: center;
-    margin-top: 10px;
+    margin-top: 8px;
     font-weight: 600;
     color: #667eea;
-    font-size: 1em;
+    font-size: 0.85em;
     background: rgba(102, 126, 234, 0.1);
-    padding: 8px 15px;
-    border-radius: 20px;
+    padding: 6px 12px;
+    border-radius: 16px;
     display: inline-block;
 }
 
-/* Controle de taille de la signature */
+.document-preview img:not(.signature-draggable):not(.paraphe-clone) {
+    max-width: 100%;
+    border: 2px solid #ddd;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* =============================================
+   SIGNATURE SIZE CONTROL
+   ============================================= */
 .signature-size-control {
-    margin-top: 20px;
-    padding: 20px;
+    margin-top: 16px;
+    padding: 16px;
     background: white;
     border-radius: 10px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
 }
 
 .signature-size-control label {
@@ -333,15 +385,16 @@ main {
     font-weight: 600;
     color: #667eea;
     margin-bottom: 10px;
-    font-size: 1.1em;
+    font-size: 0.95em;
 }
 
 .signature-size-control #size-value-display {
     color: #28a745;
-    font-size: 1.2em;
+    font-weight: 700;
 }
 
-.signature-size-control input[type="range"] {
+.signature-size-control input[type="range"],
+.paraphe-controls input[type="range"] {
     width: 100%;
     height: 8px;
     border-radius: 5px;
@@ -350,46 +403,50 @@ main {
     -webkit-appearance: none;
 }
 
-.signature-size-control input[type="range"]::-webkit-slider-thumb {
+.signature-size-control input[type="range"]::-webkit-slider-thumb,
+.paraphe-controls input[type="range"]::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 20px;
-    height: 20px;
+    width: 28px;
+    height: 28px;
     border-radius: 50%;
     background: #667eea;
     cursor: pointer;
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
 }
 
-.signature-size-control input[type="range"]::-moz-range-thumb {
-    width: 20px;
-    height: 20px;
+.signature-size-control input[type="range"]::-moz-range-thumb,
+.paraphe-controls input[type="range"]::-moz-range-thumb {
+    width: 28px;
+    height: 28px;
     border-radius: 50%;
     background: #667eea;
     cursor: pointer;
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
     border: none;
 }
 
-/* Page selector panel */
+/* =============================================
+   PAGE SELECTOR
+   ============================================= */
 .page-selector-panel {
-    margin-top: 20px;
-    padding: 20px;
+    margin-top: 16px;
+    padding: 16px;
     background: white;
     border-radius: 10px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
 }
 
 .page-selector-panel h3 {
     color: #667eea;
-    margin-bottom: 15px;
-    font-size: 1.15em;
+    margin-bottom: 12px;
+    font-size: 1.05em;
 }
 
 .page-selector-options {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 4px;
 }
 
 .radio-option {
@@ -397,10 +454,11 @@ main {
     align-items: center;
     gap: 10px;
     cursor: pointer;
-    padding: 10px 14px;
+    padding: 12px;
     border-radius: 8px;
     transition: background 0.2s;
     font-weight: 500;
+    min-height: 44px;
 }
 
 .radio-option:hover {
@@ -409,17 +467,18 @@ main {
 
 .radio-option input[type="radio"] {
     accent-color: #667eea;
-    width: 18px;
-    height: 18px;
+    width: 20px;
+    height: 20px;
     cursor: pointer;
+    flex-shrink: 0;
 }
 
 .custom-pages-container {
     display: flex;
     flex-wrap: wrap;
-    gap: 10px;
-    margin-top: 15px;
-    padding: 15px;
+    gap: 8px;
+    margin-top: 12px;
+    padding: 12px;
     background: #f8f9fa;
     border-radius: 8px;
 }
@@ -428,7 +487,7 @@ main {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 8px 14px;
+    padding: 10px 14px;
     background: white;
     border: 2px solid #ddd;
     border-radius: 8px;
@@ -436,6 +495,7 @@ main {
     transition: all 0.2s;
     font-weight: 500;
     font-size: 0.9em;
+    min-height: 44px;
 }
 
 .page-checkbox:hover {
@@ -449,19 +509,14 @@ main {
 
 .page-checkbox input[type="checkbox"] {
     accent-color: #667eea;
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
     cursor: pointer;
 }
 
-.document-preview img:not(.signature-draggable):not(.paraphe-clone) {
-    max-width: 100%;
-    border: 2px solid #ddd;
-    border-radius: 10px;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-}
-
-/* Overlay pour la signature draggable */
+/* =============================================
+   SIGNATURE/PARAPHE OVERLAY & DRAG
+   ============================================= */
 .signature-overlay {
     position: absolute;
     top: 0;
@@ -478,11 +533,15 @@ main {
     border: 2px dashed #667eea;
     border-radius: 5px;
     background: rgba(255, 255, 255, 0.9);
-    padding: 5px;
+    padding: 4px;
     box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
     transition: box-shadow 0.2s ease, border-color 0.2s ease;
     pointer-events: auto;
     z-index: 10;
+    touch-action: none;
+    /* Plus grosse zone de touch */
+    min-width: 44px;
+    min-height: 44px;
 }
 
 .paraphe-draggable {
@@ -491,26 +550,22 @@ main {
     z-index: 9;
 }
 
-.signature-draggable:hover {
-    border-color: #764ba2;
-    box-shadow: 0 6px 20px rgba(118, 75, 162, 0.4);
-}
-
 .signature-draggable:active {
     cursor: grabbing;
-    box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5);
+    box-shadow: 0 8px 24px rgba(102, 126, 234, 0.5);
+    border-color: #764ba2;
 }
 
 .signature-hint {
     position: absolute;
-    bottom: -30px;
+    bottom: -28px;
     left: 50%;
     transform: translateX(-50%);
     background: rgba(102, 126, 234, 0.95);
     color: white;
-    padding: 5px 15px;
-    border-radius: 20px;
-    font-size: 0.85em;
+    padding: 4px 12px;
+    border-radius: 16px;
+    font-size: 0.75em;
     white-space: nowrap;
     pointer-events: none;
     animation: pulse 2s ease-in-out infinite;
@@ -518,9 +573,12 @@ main {
 
 @keyframes pulse {
     0%, 100% { opacity: 1; }
-    50% { opacity: 0.7; }
+    50% { opacity: 0.6; }
 }
 
+/* =============================================
+   SIGNATURE/PARAPHE CANVAS & CONTROLS
+   ============================================= */
 #signature-canvas {
     border: 3px solid #667eea;
     border-radius: 10px;
@@ -529,47 +587,7 @@ main {
     display: block;
     margin: 0 auto;
     touch-action: none;
-}
-
-.signature-controls {
-    display: flex;
-    gap: 15px;
-    align-items: center;
-    margin-bottom: 20px;
-    flex-wrap: wrap;
-}
-
-/* Controles du paraphe */
-.paraphe-controls {
-    margin-top: 20px;
-    padding: 15px;
-    background: #f8f9fa;
-    border-radius: 10px;
-    display: flex;
-    gap: 20px;
-    flex-wrap: wrap;
-    align-items: center;
-}
-
-.paraphe-controls label {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    font-weight: 600;
-    color: #667eea;
-}
-
-.paraphe-controls input[type="range"] {
-    width: 200px;
-}
-
-.paraphe-controls select {
-    padding: 8px 12px;
-    border: 2px solid #667eea;
-    border-radius: 5px;
-    font-size: 1em;
-    cursor: pointer;
-    background: white;
+    max-width: 100%;
 }
 
 #paraphe-canvas {
@@ -580,60 +598,109 @@ main {
     display: block;
     margin: 0 auto;
     touch-action: none;
+    max-width: 100%;
 }
 
-.signature-controls label {
+.signature-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.controls-row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.controls-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.control-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-weight: 600;
     color: #333;
-}
-
-.signature-controls input[type="color"] {
-    width: 50px;
-    height: 35px;
-    border: none;
-    border-radius: 5px;
+    font-size: 0.9em;
     cursor: pointer;
 }
 
-.signature-controls input[type="range"] {
+.control-group input[type="color"] {
+    width: 40px;
+    height: 36px;
+    border: 2px solid #ddd;
+    border-radius: 6px;
+    cursor: pointer;
+    padding: 2px;
+}
+
+.control-group input[type="range"] {
     width: 100px;
+    height: 6px;
+    cursor: pointer;
+}
+
+/* Paraphe controls */
+.paraphe-controls {
+    margin-top: 16px;
+    padding: 12px;
+    background: #f8f9fa;
+    border-radius: 8px;
+}
+
+.paraphe-controls label {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-weight: 600;
+    color: #667eea;
+    font-size: 0.9em;
 }
 
 .hint {
     text-align: center;
-    color: #666;
+    color: #888;
     font-style: italic;
-    margin-top: 10px;
+    margin-top: 8px;
+    font-size: 0.85em;
 }
 
+/* =============================================
+   ACTIONS & EMAIL
+   ============================================= */
 .actions {
     display: flex;
-    gap: 15px;
-    margin-bottom: 20px;
-    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 16px;
 }
 
 .email-form {
     background: white;
-    padding: 20px;
+    padding: 16px;
     border-radius: 10px;
-    margin-top: 20px;
+    margin-top: 16px;
 }
 
 .email-form h3 {
     color: #667eea;
-    margin-bottom: 15px;
+    margin-bottom: 12px;
 }
 
 .email-form input,
 .email-form textarea {
     width: 100%;
     padding: 12px;
-    margin-bottom: 15px;
+    margin-bottom: 12px;
     border: 2px solid #ddd;
     border-radius: 8px;
-    font-size: 1em;
+    font-size: 16px; /* >= 16px empeche le zoom iOS */
     font-family: inherit;
+    -webkit-appearance: none;
 }
 
 .email-form input:focus,
@@ -644,15 +711,16 @@ main {
 
 .form-actions {
     display: flex;
-    gap: 10px;
+    gap: 8px;
 }
 
 .status-message {
-    margin-top: 15px;
-    padding: 12px;
+    margin-top: 12px;
+    padding: 10px;
     border-radius: 8px;
     text-align: center;
     font-weight: 600;
+    font-size: 0.9em;
 }
 
 .status-message.success {
@@ -665,120 +733,487 @@ main {
     color: #721c24;
 }
 
+/* =============================================
+   FOOTER
+   ============================================= */
 footer {
     background: #f8f9fa;
     text-align: center;
-    padding: 20px;
-    color: #666;
+    padding: 16px;
+    color: #999;
+    font-size: 0.85em;
 }
 
-/* Responsive */
+/* =============================================
+   RESPONSIVE - TABLETTES (max 768px)
+   ============================================= */
 @media (max-width: 768px) {
+    body {
+        padding: 8px;
+    }
+
+    .container {
+        border-radius: 12px;
+    }
+
+    header {
+        padding: 24px 16px;
+    }
+
     header h1 {
-        font-size: 1.8em;
+        font-size: 1.6em;
+    }
+
+    .header-subtitle {
+        font-size: 0.9em;
+    }
+
+    main {
+        padding: 16px;
     }
 
     .card {
-        padding: 20px;
+        padding: 16px;
+        margin-bottom: 16px;
+        border-radius: 10px;
     }
 
+    .card h2 {
+        font-size: 1.15em;
+        margin-bottom: 12px;
+    }
+
+    /* Canvas pleine largeur */
     #signature-canvas {
-        width: 100%;
-        height: 300px;
-        max-width: 100%;
+        width: 100% !important;
+        height: auto !important;
+        min-height: 160px;
     }
 
     #paraphe-canvas {
-        width: 100%;
-        height: 200px;
-        max-width: 100%;
+        width: 100% !important;
+        height: auto !important;
+        min-height: 120px;
     }
 
-    .signature-controls,
+    /* Controls */
+    .controls-row {
+        width: 100%;
+    }
+
+    .control-group input[type="range"] {
+        width: 80px;
+    }
+
+    .controls-buttons {
+        width: 100%;
+    }
+
+    .controls-buttons .btn {
+        flex: 1;
+    }
+
+    /* Actions full-width */
     .actions {
+        flex-direction: column;
+    }
+
+    .actions .btn {
+        width: 100%;
+    }
+
+    .form-actions {
+        flex-direction: column;
+    }
+
+    .form-actions .btn {
+        width: 100%;
+    }
+
+    /* Page selector */
+    .custom-pages-container {
+        gap: 6px;
+    }
+
+    .page-checkbox {
+        flex: 1 1 calc(33% - 6px);
+        min-width: 80px;
+        justify-content: center;
+    }
+
+    /* Signature overlay */
+    .signature-hint {
+        font-size: 0.7em;
+        padding: 3px 10px;
+        bottom: -24px;
+    }
+
+    /* Toolbar */
+    .doc-toolbar {
+        padding: 8px 12px;
+    }
+
+    /* Upload area */
+    .upload-area {
+        padding: 24px 16px;
+    }
+
+    .drop-icon {
+        font-size: 2.5em;
+        margin-bottom: 8px;
+    }
+}
+
+/* =============================================
+   RESPONSIVE - TELEPHONES (max 480px)
+   ============================================= */
+@media (max-width: 480px) {
+    body {
+        padding: 0;
+        background: white;
+    }
+
+    .container {
+        border-radius: 0;
+        box-shadow: none;
+        min-height: 100vh;
+    }
+
+    header {
+        padding: 20px 16px;
+        border-radius: 0;
+    }
+
+    header h1 {
+        font-size: 1.35em;
+    }
+
+    .header-subtitle {
+        font-size: 0.8em;
+    }
+
+    main {
+        padding: 12px;
+    }
+
+    .card {
+        padding: 14px;
+        margin-bottom: 12px;
+        border-radius: 10px;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+    }
+
+    .card h2 {
+        font-size: 1.05em;
+        margin-bottom: 10px;
+    }
+
+    /* Mobile: texte tactile */
+    .drop-text-mobile { display: block; }
+    .drop-text-desktop { display: none !important; }
+
+    .upload-area {
+        padding: 20px 12px;
+        border-width: 2px;
+    }
+
+    .drop-icon {
+        font-size: 2em;
+        margin-bottom: 6px;
+    }
+
+    .drop-text {
+        font-size: 0.95em;
+    }
+
+    /* Signature canvas - pleine largeur, bonne hauteur */
+    #signature-canvas {
+        width: 100% !important;
+        min-height: 180px;
+        border-width: 2px;
+    }
+
+    #paraphe-canvas {
+        width: 100% !important;
+        min-height: 130px;
+        border-width: 2px;
+    }
+
+    /* Controls sur telephone */
+    .controls-row {
+        gap: 8px;
+    }
+
+    .control-group {
+        font-size: 0.85em;
+    }
+
+    .control-group span {
+        min-width: auto;
+    }
+
+    .control-group input[type="color"] {
+        width: 36px;
+        height: 32px;
+    }
+
+    .control-group input[type="range"] {
+        width: 70px;
+    }
+
+    .controls-buttons .btn {
+        padding: 10px 12px;
+        font-size: 13px;
+    }
+
+    /* Slider thumbs plus gros sur tactile */
+    .signature-size-control input[type="range"]::-webkit-slider-thumb,
+    .paraphe-controls input[type="range"]::-webkit-slider-thumb {
+        width: 32px;
+        height: 32px;
+    }
+
+    .signature-size-control input[type="range"]::-moz-range-thumb,
+    .paraphe-controls input[type="range"]::-moz-range-thumb {
+        width: 32px;
+        height: 32px;
+    }
+
+    /* Actions */
+    .actions .btn {
+        padding: 14px;
+        font-size: 15px;
+    }
+
+    /* Boutons d'action pleine largeur */
+    .btn {
+        padding: 12px 16px;
+    }
+
+    /* Page selector compact */
+    .page-selector-panel {
+        padding: 12px;
+    }
+
+    .page-selector-panel h3 {
+        font-size: 0.95em;
+        margin-bottom: 8px;
+    }
+
+    .radio-option {
+        padding: 10px 8px;
+        font-size: 0.9em;
+    }
+
+    .page-checkbox {
+        flex: 1 1 calc(50% - 6px);
+        min-width: 70px;
+        padding: 8px 10px;
+        font-size: 0.85em;
+    }
+
+    /* Signature draggable - zone de toucher plus grande */
+    .signature-draggable {
+        padding: 6px;
+        border-width: 3px;
+    }
+
+    .signature-hint {
+        font-size: 0.65em;
+        padding: 2px 8px;
+        bottom: -22px;
+    }
+
+    /* Document toolbar compact */
+    .doc-toolbar {
+        flex-direction: row;
+        justify-content: space-between;
+        padding: 8px 10px;
+    }
+
+    .doc-toolbar .btn-sm {
+        padding: 6px 10px;
+        font-size: 12px;
+    }
+
+    /* Size controls */
+    .signature-size-control {
+        padding: 12px;
+    }
+
+    .signature-size-control label {
+        font-size: 0.85em;
+    }
+
+    /* Email form */
+    .email-form {
+        padding: 12px;
+    }
+
+    .email-form input,
+    .email-form textarea {
+        padding: 10px;
+        font-size: 16px;
+        margin-bottom: 10px;
+    }
+
+    /* PDF pages */
+    .pdf-pages-container {
+        gap: 16px;
+    }
+
+    .pdf-page-container {
+        margin-bottom: 0;
+    }
+
+    .pdf-page-canvas {
+        border-radius: 6px;
+        border-width: 1px;
+    }
+
+    .page-label {
+        font-size: 0.75em;
+        padding: 4px 10px;
+        margin-top: 6px;
+    }
+
+    /* Badge */
+    .badge {
+        font-size: 0.7em;
+        padding: 4px 8px;
+    }
+
+    .section-header {
+        gap: 6px;
+    }
+
+    .section-header h2 {
+        font-size: 1em;
+    }
+
+    /* Hint */
+    .hint {
+        font-size: 0.8em;
+    }
+
+    /* Footer compact */
+    footer {
+        padding: 12px;
+        font-size: 0.75em;
+    }
+
+    /* User bar */
+    .user-bar {
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .paraphe-controls {
+        padding: 10px;
+    }
+
+    .paraphe-controls label {
+        font-size: 0.85em;
+    }
+}
+
+/* =============================================
+   RESPONSIVE - TRES PETITS ECRANS (max 360px)
+   ============================================= */
+@media (max-width: 360px) {
+    header h1 {
+        font-size: 1.15em;
+    }
+
+    .header-subtitle {
+        font-size: 0.75em;
+    }
+
+    main {
+        padding: 8px;
+    }
+
+    .card {
+        padding: 10px;
+        margin-bottom: 10px;
+    }
+
+    .card h2 {
+        font-size: 0.95em;
+    }
+
+    .controls-row {
         flex-direction: column;
         align-items: stretch;
     }
 
-    .signature-controls input[type="range"] {
-        width: 100%;
+    .control-group {
+        justify-content: space-between;
     }
 
-    .paraphe-controls {
-        flex-direction: column;
-    }
-
-    .paraphe-controls input[type="range"] {
-        width: 100%;
-    }
-
-    .signature-draggable {
-        cursor: grab;
-        touch-action: none;
-    }
-
-    .signature-draggable:active {
-        cursor: grabbing;
-    }
-
-    .signature-hint {
-        font-size: 0.75em;
-        padding: 3px 10px;
-        bottom: -25px;
-    }
-
-    .pdf-pages-container {
-        gap: 20px;
-    }
-
-    .pdf-page-container {
-        margin-bottom: 15px;
-    }
-
-    .page-label {
-        font-size: 0.9em;
-        padding: 6px 12px;
-    }
-
-    .doc-toolbar {
-        flex-direction: column;
-        text-align: center;
-    }
-
-    .section-header {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-
-    .custom-pages-container {
-        gap: 8px;
+    .control-group input[type="range"] {
+        flex: 1;
+        width: auto;
     }
 
     .page-checkbox {
-        padding: 6px 10px;
-        font-size: 0.85em;
+        flex: 1 1 100%;
     }
 
     .radio-option {
-        padding: 8px 10px;
+        padding: 8px 6px;
+        font-size: 0.85em;
     }
 }
 
-@media (max-width: 600px) {
-    .user-bar {
-        flex-direction: column;
-        gap: 15px;
+/* =============================================
+   LANDSCAPE PHONE
+   ============================================= */
+@media (max-height: 500px) and (orientation: landscape) {
+    header {
+        padding: 12px 16px;
     }
 
-    main {
-        padding: 15px;
+    header h1 {
+        font-size: 1.2em;
+        margin-bottom: 2px;
     }
 
-    .upload-area {
-        padding: 25px;
+    .header-subtitle {
+        font-size: 0.75em;
     }
 
-    .drop-icon {
-        font-size: 3em;
+    .card {
+        padding: 12px;
+        margin-bottom: 10px;
     }
+
+    #signature-canvas {
+        min-height: 120px !important;
+    }
+
+    #paraphe-canvas {
+        min-height: 80px !important;
+    }
+
+    footer {
+        padding: 8px;
+    }
+}
+
+/* =============================================
+   PREVENT BODY SCROLL WHEN DRAWING
+   ============================================= */
+body.drawing-active {
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+}
+
+/* =============================================
+   DARK MODE (prefers)
+   ============================================= */
+@media (prefers-color-scheme: dark) {
+    /* Garder le theme clair car la signature a besoin de fond blanc.
+       On peut ajouter un dark mode plus tard si demande. */
 }
