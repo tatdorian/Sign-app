@@ -5,56 +5,82 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
-    <title>Signature de Documents</title>
+    <meta name="theme-color" content="#0f172a">
+    <title>Signature</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <!-- Barre de chargement -->
+    <!-- Loading -->
     <div id="loading-overlay" class="loading-overlay" style="display: none;">
         <div class="loading-spinner"></div>
         <p class="loading-text">Chargement...</p>
     </div>
 
+    <!-- Toggle theme -->
+    <button id="theme-toggle" class="theme-toggle" aria-label="Basculer le theme">
+        <span class="theme-icon-light">☀</span>
+        <span class="theme-icon-dark">☾</span>
+    </button>
+
     <div class="container">
         <header>
-            <h1>Signature de Documents</h1>
-            <p class="header-subtitle">Signez vos documents et envoyez-les</p>
+            <div class="brand">
+                <div class="brand-mark">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 17.5V21h3.5L17 10.5 13.5 7 3 17.5z"/>
+                        <path d="M14.5 6L18 9.5"/>
+                    </svg>
+                </div>
+                <div class="brand-text">
+                    <h1>Signature</h1>
+                    <p class="subtitle">Signez. Partagez. Simple.</p>
+                </div>
+            </div>
         </header>
 
         <main>
-            <!-- Section 1: Upload de document -->
+            <!-- Section 1: Upload -->
             <section class="card" id="upload-section">
                 <div class="section-header">
-                    <h2>1. Charger un document</h2>
+                    <div class="section-title">
+                        <span class="step">1</span>
+                        <h2>Document</h2>
+                    </div>
                     <span id="cached-signature-badge" class="badge badge-success" style="display: none;">
-                        Signature prete
+                        <span class="dot"></span>Signature prete
                     </span>
                 </div>
                 <div class="upload-area" id="drop-zone">
                     <input type="file" id="file-input" accept=".pdf,image/*" hidden>
                     <div class="drop-zone-content">
-                        <div class="drop-icon">📄</div>
-                        <p class="drop-text drop-text-desktop">Glissez-deposez un document ici</p>
-                        <p class="drop-text drop-text-mobile">Appuyez pour choisir un document</p>
-                        <p class="drop-text-or drop-text-desktop">ou</p>
+                        <div class="drop-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="17 8 12 3 7 8"/>
+                                <line x1="12" y1="3" x2="12" y2="15"/>
+                            </svg>
+                        </div>
+                        <p class="drop-text drop-text-desktop">Glissez-deposez votre document</p>
+                        <p class="drop-text drop-text-mobile">Choisir un document</p>
                         <button class="btn btn-primary" onclick="document.getElementById('file-input').click()">
-                            Choisir un fichier
+                            Parcourir
                         </button>
-                        <p class="file-info" id="file-info">PDF ou Image (JPG, PNG)</p>
+                        <p class="file-info" id="file-info">PDF, JPG, PNG</p>
                     </div>
                 </div>
 
-                <!-- Toolbar document -->
                 <div id="doc-toolbar" class="doc-toolbar" style="display: none;">
                     <div class="toolbar-left">
                         <span id="page-info-display" class="page-info"></span>
                     </div>
                     <div class="toolbar-right">
-                        <button class="btn btn-secondary btn-sm" id="new-doc-btn">Nouveau document</button>
+                        <button class="btn btn-ghost btn-sm" id="new-doc-btn">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+                            Nouveau
+                        </button>
                     </div>
                 </div>
 
-                <!-- Apercu du document -->
                 <div id="document-preview" class="document-preview">
                     <div id="signature-overlay" class="signature-overlay" style="display: none;">
                         <img id="signature-preview" class="signature-draggable" alt="Signature">
@@ -62,21 +88,20 @@
                     </div>
                     <div id="paraphe-overlay" class="signature-overlay" style="display: none;">
                         <img id="paraphe-preview" class="signature-draggable paraphe-draggable" alt="Paraphe">
-                        <div class="signature-hint">Glissez pour positionner le paraphe</div>
+                        <div class="signature-hint">Glissez le paraphe</div>
                     </div>
                 </div>
 
-                <!-- Controle de taille de la signature -->
                 <div id="signature-size-control" class="signature-size-control" style="display: none;">
                     <label for="signature-size-slider">
-                        Taille de la signature: <span id="size-value-display">150px</span>
+                        <span>Taille de la signature</span>
+                        <span class="value-pill" id="size-value-display">150px</span>
                     </label>
                     <input type="range" id="signature-size-slider" min="50" max="400" value="150" step="5">
                 </div>
 
-                <!-- Selecteur de pages pour la signature -->
                 <div id="page-selector-panel" class="page-selector-panel" style="display: none;">
-                    <h3>Placement de la signature</h3>
+                    <h3>Pages a signer</h3>
                     <div class="page-selector-options">
                         <label class="radio-option">
                             <input type="radio" name="sig-page-mode" value="current" checked>
@@ -98,62 +123,140 @@
 
             <!-- Section 2: Signature -->
             <section class="card" id="signature-section" style="display: none;">
-                <h2>2. Votre signature</h2>
+                <div class="section-header">
+                    <div class="section-title">
+                        <span class="step">2</span>
+                        <h2>Signature</h2>
+                    </div>
+                </div>
+
+                <!-- Toolbar outils -->
+                <div class="tools-bar" data-tools="signature">
+                    <button class="tool-btn active" data-tool="pen" data-target="signature" aria-label="Stylo">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>
+                        <span>Stylo</span>
+                    </button>
+                    <button class="tool-btn" data-tool="highlighter" data-target="signature" aria-label="Surligneur">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l-6 6v3h3l6-6"/><path d="M22 12l-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>
+                        <span>Surligneur</span>
+                    </button>
+                    <button class="tool-btn" data-tool="eraser" data-target="signature" aria-label="Gomme">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20H7L3 16a2 2 0 0 1 0-2.8L13.4 2.8a2 2 0 0 1 2.8 0l5 5a2 2 0 0 1 0 2.8L11 20"/><line x1="18" y1="13" x2="9" y2="4"/></svg>
+                        <span>Gomme</span>
+                    </button>
+                </div>
+
+                <!-- Controles -->
                 <div class="signature-controls">
                     <div class="controls-row">
-                        <label class="control-group">
+                        <label class="control-group control-color" data-target="signature">
                             <span>Couleur</span>
-                            <input type="color" id="signature-color" value="#000000">
+                            <div class="color-presets">
+                                <button class="color-swatch active" data-color="#000000" style="background:#000000" aria-label="Noir"></button>
+                                <button class="color-swatch" data-color="#1e40af" style="background:#1e40af" aria-label="Bleu"></button>
+                                <button class="color-swatch" data-color="#dc2626" style="background:#dc2626" aria-label="Rouge"></button>
+                                <button class="color-swatch" data-color="#16a34a" style="background:#16a34a" aria-label="Vert"></button>
+                                <input type="color" id="signature-color" value="#000000" class="color-picker-custom">
+                            </div>
                         </label>
                         <label class="control-group">
-                            <span>Epaisseur</span>
-                            <input type="range" id="signature-width" min="1" max="10" value="3">
+                            <span>Epaisseur <em id="signature-width-value">3</em></span>
+                            <input type="range" id="signature-width" min="1" max="20" value="3">
                         </label>
                     </div>
                     <div class="controls-row controls-buttons">
-                        <button class="btn btn-secondary btn-sm" id="undo-signature">Annuler</button>
-                        <button class="btn btn-secondary btn-sm" id="clear-signature">Effacer</button>
+                        <button class="btn btn-ghost btn-sm" id="undo-signature">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/></svg>
+                            Annuler
+                        </button>
+                        <button class="btn btn-ghost btn-sm" id="clear-signature">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                            Effacer
+                        </button>
                     </div>
                 </div>
-                <canvas id="signature-canvas" width="600" height="200"></canvas>
-                <p class="hint">Dessinez votre signature ci-dessus</p>
+                <div class="canvas-wrap">
+                    <canvas id="signature-canvas" width="600" height="220"></canvas>
+                </div>
+                <p class="hint">Signez ci-dessus avec votre doigt ou souris</p>
             </section>
 
             <!-- Section 3: Paraphe -->
             <section class="card" id="paraphe-section" style="display: none;">
-                <h2>3. Paraphe (optionnel)</h2>
-                <p class="hint">Copie auto sur toutes les pages</p>
+                <div class="section-header">
+                    <div class="section-title">
+                        <span class="step">3</span>
+                        <h2>Paraphe <em>(optionnel)</em></h2>
+                    </div>
+                </div>
+                <p class="hint">Copie automatique sur toutes les pages</p>
+
+                <div class="tools-bar" data-tools="paraphe">
+                    <button class="tool-btn active" data-tool="pen" data-target="paraphe">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>
+                        <span>Stylo</span>
+                    </button>
+                    <button class="tool-btn" data-tool="highlighter" data-target="paraphe">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l-6 6v3h3l6-6"/><path d="M22 12l-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>
+                        <span>Surligneur</span>
+                    </button>
+                    <button class="tool-btn" data-tool="eraser" data-target="paraphe">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20H7L3 16a2 2 0 0 1 0-2.8L13.4 2.8a2 2 0 0 1 2.8 0l5 5a2 2 0 0 1 0 2.8L11 20"/><line x1="18" y1="13" x2="9" y2="4"/></svg>
+                        <span>Gomme</span>
+                    </button>
+                </div>
+
                 <div class="signature-controls">
                     <div class="controls-row">
-                        <label class="control-group">
+                        <label class="control-group control-color" data-target="paraphe">
                             <span>Couleur</span>
-                            <input type="color" id="paraphe-color" value="#000000">
+                            <div class="color-presets">
+                                <button class="color-swatch active" data-color="#000000" style="background:#000000"></button>
+                                <button class="color-swatch" data-color="#1e40af" style="background:#1e40af"></button>
+                                <button class="color-swatch" data-color="#dc2626" style="background:#dc2626"></button>
+                                <button class="color-swatch" data-color="#16a34a" style="background:#16a34a"></button>
+                                <input type="color" id="paraphe-color" value="#000000" class="color-picker-custom">
+                            </div>
                         </label>
                         <label class="control-group">
-                            <span>Epaisseur</span>
-                            <input type="range" id="paraphe-width" min="1" max="10" value="2">
+                            <span>Epaisseur <em id="paraphe-width-value">2</em></span>
+                            <input type="range" id="paraphe-width" min="1" max="20" value="2">
                         </label>
                     </div>
                     <div class="controls-row controls-buttons">
-                        <button class="btn btn-secondary btn-sm" id="undo-paraphe">Annuler</button>
-                        <button class="btn btn-secondary btn-sm" id="clear-paraphe">Effacer</button>
+                        <button class="btn btn-ghost btn-sm" id="undo-paraphe">Annuler</button>
+                        <button class="btn btn-ghost btn-sm" id="clear-paraphe">Effacer</button>
                     </div>
                 </div>
-                <canvas id="paraphe-canvas" width="400" height="150"></canvas>
+                <div class="canvas-wrap">
+                    <canvas id="paraphe-canvas" width="400" height="160"></canvas>
+                </div>
                 <div class="paraphe-controls">
                     <label>
-                        Taille: <span id="paraphe-size-value">80px</span>
-                        <input type="range" id="paraphe-size" min="30" max="150" value="80" step="5">
+                        <span>Taille du paraphe</span>
+                        <span class="value-pill" id="paraphe-size-value">80px</span>
                     </label>
+                    <input type="range" id="paraphe-size" min="30" max="150" value="80" step="5">
                 </div>
             </section>
 
             <!-- Section 4: Actions -->
             <section class="card" id="actions-section" style="display: none;">
-                <h2>4. Envoyer ou telecharger</h2>
+                <div class="section-header">
+                    <div class="section-title">
+                        <span class="step">4</span>
+                        <h2>Finaliser</h2>
+                    </div>
+                </div>
                 <div class="actions">
-                    <button class="btn btn-success" id="download-btn">Telecharger le PDF</button>
-                    <button class="btn btn-info" id="email-btn">Envoyer par Email</button>
+                    <button class="btn btn-success" id="download-btn">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        Telecharger
+                    </button>
+                    <button class="btn btn-primary" id="email-btn">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                        Envoyer
+                    </button>
                 </div>
                 <div id="email-form" class="email-form" style="display: none;">
                     <h3>Envoyer par email</h3>
@@ -162,7 +265,7 @@
                     <textarea id="email-message" placeholder="Message (optionnel)" rows="3"></textarea>
                     <div class="form-actions">
                         <button class="btn btn-primary" id="send-email-btn">Envoyer</button>
-                        <button class="btn btn-secondary" id="cancel-email-btn">Annuler</button>
+                        <button class="btn btn-ghost" id="cancel-email-btn">Annuler</button>
                     </div>
                     <div id="email-status" class="status-message"></div>
                 </div>
@@ -170,11 +273,10 @@
         </main>
 
         <footer>
-            <p>&copy; 2025 Signature de Documents</p>
+            <p>&copy; 2025 Signature</p>
         </footer>
     </div>
 
-    <!-- Scripts -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
