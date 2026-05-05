@@ -326,7 +326,8 @@ main {
     margin-top: 16px;
     text-align: center;
     position: relative;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: visible;
 }
 
 .pdf-pages-container {
@@ -787,13 +788,13 @@ footer {
     #signature-canvas {
         width: 100% !important;
         height: auto !important;
-        min-height: 160px;
+        min-height: 220px;
     }
 
     #paraphe-canvas {
         width: 100% !important;
         height: auto !important;
-        min-height: 120px;
+        min-height: 160px;
     }
 
     /* Controls */
@@ -929,13 +930,13 @@ footer {
     /* Signature canvas - pleine largeur, bonne hauteur */
     #signature-canvas {
         width: 100% !important;
-        min-height: 180px;
+        min-height: 220px;
         border-width: 2px;
     }
 
     #paraphe-canvas {
         width: 100% !important;
-        min-height: 130px;
+        min-height: 160px;
         border-width: 2px;
     }
 
@@ -1203,11 +1204,15 @@ footer {
 
 /* =============================================
    PREVENT BODY SCROLL WHEN DRAWING
+   iOS fix: position:fixed jumps to top — JS sets body.style.top = -scrollY
+   before adding this class, and restores scrollY on removal.
    ============================================= */
 body.drawing-active {
     overflow: hidden;
     position: fixed;
     width: 100%;
+    left: 0;
+    right: 0;
 }
 
 /* =============================================
