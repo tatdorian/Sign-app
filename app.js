@@ -452,7 +452,15 @@ async function loadPDF(file) {
         pageLabel.className = 'page-label';
         pageLabel.textContent = `Page ${pageNum} / ${numPages}`;
 
+        // Canvas d'annotation par-dessus la page PDF
+        const annotCanvas = document.createElement('canvas');
+        annotCanvas.width = canvas.width;
+        annotCanvas.height = canvas.height;
+        annotCanvas.className = 'annotation-canvas';
+        annotCanvas.dataset.page = pageNum;
+
         pageContainer.appendChild(canvas);
+        pageContainer.appendChild(annotCanvas);
         pageContainer.appendChild(pageLabel);
         pagesContainer.appendChild(pageContainer);
     }
@@ -1653,6 +1661,27 @@ async function createSignedPDF() {
         });
     }
 
+    // Integrer les annotations (surligneur) sur chaque page
+    const annotCanvases = document.querySelectorAll('.annotation-canvas');
+    for (const annotCanvas of annotCanvases) {
+        const pageNum = parseInt(annotCanvas.dataset.page);
+        if (!pageNum || pageNum < 1 || pageNum > pages.length) continue;
+
+        // Verifier si le canvas a des pixels non transparents
+        const actx = annotCanvas.getContext('2d');
+        const imgData = actx.getImageData(0, 0, annotCanvas.width, annotCanvas.height);
+        const hasContent = imgData.data.some((v, i) => i % 4 === 3 && v > 0);
+        if (!hasContent) continue;
+
+        const annotPng = annotCanvas.toDataURL('image/png');
+        const annotBytes = await fetch(annotPng).then(r => r.arrayBuffer());
+        const annotImage = await pdfDoc.embedPng(annotBytes);
+
+        const page = pages[pageNum - 1];
+        const { width: pw, height: ph } = page.getSize();
+        page.drawImage(annotImage, { x: 0, y: 0, width: pw, height: ph });
+    }
+
     return await pdfDoc.save();
 }
 
@@ -1726,6 +1755,197 @@ sendEmailBtn.addEventListener('click', async () => {
         statusDiv.textContent = 'Erreur lors de l\'envoi. Verifiez que le serveur est demarre.';
         statusDiv.className = 'status-message error';
     }
+});
+
+// ==============================================
+// ANNOTATION SUR LE DOCUMENT (surligneur de pages)
+// ==============================================
+let annotationMode = false;
+let annotationEraseMode = false;
+let annotColor = '#FFD60A';
+let annotSize = 22;
+let isAnnotating = false;
+let annotLastX = 0, annotLastY = 0;
+
+const annotToolbar = document.getElementById('annotation-toolbar');
+const toggleAnnotBtn = document.getElementById('toggle-annotation-btn');
+const annotHighlightBtn = document.getElementById('annot-highlight-btn');
+const annotEraseBtn = document.getElementById('annot-erase-btn');
+const annotSizeInput = document.getElementById('annot-size');
+const annotClearBtn = document.getElementById('annot-clear-btn');
+
+function setAnnotationMode(active) {
+    annotationMode = active;
+    if (active) {
+        documentPreview.classList.add('annotation-mode');
+        if (annotToolbar) annotToolbar.style.display = 'flex';
+        if (toggleAnnotBtn) {
+            toggleAnnotBtn.style.background = 'rgba(255,214,10,.35)';
+            toggleAnnotBtn.style.borderColor = '#FFD60A';
+            toggleAnnotBtn.style.color = '#7a5f00';
+        }
+    } else {
+        documentPreview.classList.remove('annotation-mode');
+        documentPreview.classList.remove('erase-mode');
+        if (annotToolbar) annotToolbar.style.display = 'none';
+        if (toggleAnnotBtn) {
+            toggleAnnotBtn.style.background = '';
+            toggleAnnotBtn.style.borderColor = '';
+            toggleAnnotBtn.style.color = '';
+        }
+    }
+}
+
+if (toggleAnnotBtn) {
+    toggleAnnotBtn.addEventListener('click', () => setAnnotationMode(!annotationMode));
+}
+
+if (annotHighlightBtn) {
+    annotHighlightBtn.addEventListener('click', () => {
+        annotationEraseMode = false;
+        documentPreview.classList.remove('erase-mode');
+        annotHighlightBtn.classList.add('active');
+        annotHighlightBtn.classList.remove('active-erase');
+        if (annotEraseBtn) {
+            annotEraseBtn.classList.remove('active');
+            annotEraseBtn.classList.remove('active-erase');
+        }
+    });
+}
+
+if (annotEraseBtn) {
+    annotEraseBtn.addEventListener('click', () => {
+        annotationEraseMode = true;
+        documentPreview.classList.add('erase-mode');
+        annotEraseBtn.classList.add('active', 'active-erase');
+        if (annotHighlightBtn) {
+            annotHighlightBtn.classList.remove('active');
+        }
+    });
+}
+
+document.querySelectorAll('.annot-color-swatch').forEach(swatch => {
+    swatch.addEventListener('click', () => {
+        document.querySelectorAll('.annot-color-swatch').forEach(s => s.classList.remove('active'));
+        swatch.classList.add('active');
+        annotColor = swatch.dataset.annotColor;
+    });
+});
+
+if (annotSizeInput) {
+    annotSizeInput.addEventListener('input', () => { annotSize = parseInt(annotSizeInput.value); });
+}
+
+if (annotClearBtn) {
+    annotClearBtn.addEventListener('click', () => {
+        document.querySelectorAll('.annotation-canvas').forEach(c => {
+            const ctx = c.getContext('2d');
+            ctx.clearRect(0, 0, c.width, c.height);
+        });
+    });
+}
+
+function getAnnotCanvasForEvent(e) {
+    const touch = e.touches ? e.touches[0] : e;
+    const el = document.elementFromPoint(touch.clientX, touch.clientY);
+    if (!el) return null;
+    // chercher le canvas annotation le plus proche
+    const pageContainer = el.closest('.pdf-page-container') || documentPreview.querySelector('.pdf-page-container');
+    if (!pageContainer) return null;
+    return pageContainer.querySelector('.annotation-canvas');
+}
+
+function annotDraw(annotCtx, fromX, fromY, toX, toY) {
+    if (annotationEraseMode) {
+        annotCtx.save();
+        annotCtx.globalCompositeOperation = 'destination-out';
+        annotCtx.lineWidth = annotSize * 2;
+        annotCtx.lineCap = 'round'; annotCtx.lineJoin = 'round';
+        annotCtx.globalAlpha = 1;
+        annotCtx.beginPath();
+        annotCtx.moveTo(fromX, fromY);
+        annotCtx.lineTo(toX, toY);
+        annotCtx.stroke();
+        annotCtx.restore();
+    } else {
+        annotCtx.save();
+        annotCtx.globalCompositeOperation = 'source-over';
+        annotCtx.globalAlpha = 0.42;
+        annotCtx.strokeStyle = annotColor;
+        annotCtx.lineWidth = annotSize;
+        annotCtx.lineCap = 'square'; annotCtx.lineJoin = 'miter';
+        annotCtx.beginPath();
+        annotCtx.moveTo(fromX, fromY);
+        annotCtx.lineTo(toX, toY);
+        annotCtx.stroke();
+        annotCtx.restore();
+    }
+}
+
+let currentAnnotCanvas = null;
+
+documentPreview.addEventListener('mousedown', (e) => {
+    if (!annotationMode) return;
+    currentAnnotCanvas = e.target.closest('.pdf-page-container')?.querySelector('.annotation-canvas')
+        || documentPreview.querySelector('.annotation-canvas');
+    if (!currentAnnotCanvas) return;
+    isAnnotating = true;
+    const rect = currentAnnotCanvas.getBoundingClientRect();
+    const scaleX = currentAnnotCanvas.width / rect.width;
+    const scaleY = currentAnnotCanvas.height / rect.height;
+    annotLastX = (e.clientX - rect.left) * scaleX;
+    annotLastY = (e.clientY - rect.top) * scaleY;
+    e.preventDefault();
+});
+
+documentPreview.addEventListener('mousemove', (e) => {
+    if (!annotationMode || !isAnnotating || !currentAnnotCanvas) return;
+    const rect = currentAnnotCanvas.getBoundingClientRect();
+    const scaleX = currentAnnotCanvas.width / rect.width;
+    const scaleY = currentAnnotCanvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
+    annotDraw(currentAnnotCanvas.getContext('2d'), annotLastX, annotLastY, x, y);
+    annotLastX = x; annotLastY = y;
+    e.preventDefault();
+});
+
+document.addEventListener('mouseup', () => { isAnnotating = false; currentAnnotCanvas = null; });
+
+documentPreview.addEventListener('touchstart', (e) => {
+    if (!annotationMode || e.touches.length !== 1) return;
+    lockBodyScroll();
+    const touch = e.touches[0];
+    const pageContainer = document.elementFromPoint(touch.clientX, touch.clientY)?.closest('.pdf-page-container');
+    currentAnnotCanvas = pageContainer?.querySelector('.annotation-canvas')
+        || documentPreview.querySelector('.annotation-canvas');
+    if (!currentAnnotCanvas) return;
+    isAnnotating = true;
+    const rect = currentAnnotCanvas.getBoundingClientRect();
+    const scaleX = currentAnnotCanvas.width / rect.width;
+    const scaleY = currentAnnotCanvas.height / rect.height;
+    annotLastX = (touch.clientX - rect.left) * scaleX;
+    annotLastY = (touch.clientY - rect.top) * scaleY;
+    e.preventDefault();
+}, { passive: false });
+
+documentPreview.addEventListener('touchmove', (e) => {
+    if (!annotationMode || !isAnnotating || !currentAnnotCanvas || e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    const rect = currentAnnotCanvas.getBoundingClientRect();
+    const scaleX = currentAnnotCanvas.width / rect.width;
+    const scaleY = currentAnnotCanvas.height / rect.height;
+    const x = (touch.clientX - rect.left) * scaleX;
+    const y = (touch.clientY - rect.top) * scaleY;
+    annotDraw(currentAnnotCanvas.getContext('2d'), annotLastX, annotLastY, x, y);
+    annotLastX = x; annotLastY = y;
+    e.preventDefault();
+}, { passive: false });
+
+documentPreview.addEventListener('touchend', () => {
+    isAnnotating = false;
+    currentAnnotCanvas = null;
+    unlockBodyScroll();
 });
 
 // ==============================================

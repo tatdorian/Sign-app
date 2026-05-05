@@ -73,11 +73,43 @@
                     <div class="toolbar-left">
                         <span id="page-info-display" class="page-info"></span>
                     </div>
-                    <div class="toolbar-right">
+                    <div class="toolbar-right" style="display:flex;gap:6px;align-items:center">
+                        <button class="btn btn-ghost btn-sm" id="toggle-annotation-btn" style="background:rgba(255,214,10,.15);color:#9a7800;border:1px solid rgba(255,214,10,.4);">
+                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l-6 6v3h3l6-6"/><path d="M22 12l-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>
+                            Surligner
+                        </button>
                         <button class="btn btn-ghost btn-sm" id="new-doc-btn">
                             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
                             Nouveau
                         </button>
+                    </div>
+                </div>
+
+                <!-- Barre d'annotation sur le document -->
+                <div id="annotation-toolbar" class="annotation-toolbar" style="display: none;">
+                    <div class="annotation-tools">
+                        <button class="annot-btn active" id="annot-highlight-btn">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l-6 6v3h3l6-6"/><path d="M22 12l-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>
+                            Surligneur
+                        </button>
+                        <button class="annot-btn" id="annot-erase-btn">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20H7L3 16a2 2 0 0 1 0-2.8L13.4 2.8a2 2 0 0 1 2.8 0l5 5a2 2 0 0 1 0 2.8L11 20"/></svg>
+                            Gomme
+                        </button>
+                    </div>
+                    <div class="annotation-controls">
+                        <div style="display:flex;gap:5px;align-items:center">
+                            <button class="annot-color-swatch active" data-annot-color="#FFD60A" style="background:#FFD60A" title="Jaune"></button>
+                            <button class="annot-color-swatch" data-annot-color="#34C759" style="background:#34C759" title="Vert"></button>
+                            <button class="annot-color-swatch" data-annot-color="#FF9500" style="background:#FF9500" title="Orange"></button>
+                            <button class="annot-color-swatch" data-annot-color="#0A84FF" style="background:#0A84FF" title="Bleu"></button>
+                            <button class="annot-color-swatch" data-annot-color="#FF453A" style="background:#FF453A" title="Rouge"></button>
+                        </div>
+                        <div class="annot-size-wrap">
+                            <span>Taille</span>
+                            <input type="range" id="annot-size" min="8" max="48" value="22" step="2">
+                        </div>
+                        <button class="annot-clear-btn" id="annot-clear-btn">Effacer tout</button>
                     </div>
                 </div>
 
