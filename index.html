@@ -5,7 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
-    <meta name="theme-color" content="#0f172a">
+    <meta name="theme-color" content="#007AFF">
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" type="image/svg+xml" href="icon.svg">
+    <link rel="apple-touch-icon" href="icon-192.png">
     <title>Signature</title>
     <link rel="stylesheet" href="styles.css">
 </head>
@@ -16,11 +19,23 @@
         <p class="loading-text">Chargement...</p>
     </div>
 
+    <!-- Bouton installer PWA -->
+    <button id="install-btn" class="install-btn" style="display:none" aria-label="Installer l'application">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        <span>Installer</span>
+    </button>
+
     <!-- Toggle theme -->
     <button id="theme-toggle" class="theme-toggle" aria-label="Basculer le theme">
         <span class="theme-icon-light">☀</span>
         <span class="theme-icon-dark">☾</span>
     </button>
+
+    <!-- Indicateur hors-ligne -->
+    <div id="offline-indicator" class="offline-indicator" style="display:none">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.58 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+        <span>Hors ligne</span>
+    </div>
 
     <div class="container">
         <header>
@@ -315,5 +330,65 @@
     <script src="supabase-client.js"></script>
     <script src="session-check.js"></script>
     <script src="app.js"></script>
+
+    <!-- ============================================
+         PWA: enregistrement Service Worker + install
+         ============================================ -->
+    <script>
+    // Enregistrement du service worker
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('sw.js')
+                .then(reg => console.log('[PWA] SW enregistre:', reg.scope))
+                .catch(err => console.warn('[PWA] SW echec:', err));
+        });
+    }
+
+    // Bouton "Installer l'app"
+    let deferredInstallPrompt = null;
+    const installBtn = document.getElementById('install-btn');
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredInstallPrompt = e;
+        if (installBtn) installBtn.style.display = 'inline-flex';
+    });
+
+    if (installBtn) {
+        installBtn.addEventListener('click', async () => {
+            if (!deferredInstallPrompt) {
+                // iOS: pas de prompt, afficher instructions
+                const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+                if (isIOS) {
+                    alert("Pour installer sur iPhone/iPad : appuyez sur le bouton Partager puis 'Sur l'ecran d'accueil'.");
+                } else {
+                    alert("L'application est deja installee, ou votre navigateur ne supporte pas l'installation. Sur Chrome/Edge, cherchez l'icone d'installation dans la barre d'adresse.");
+                }
+                return;
+            }
+            deferredInstallPrompt.prompt();
+            const { outcome } = await deferredInstallPrompt.userChoice;
+            console.log('[PWA] Choix installation:', outcome);
+            deferredInstallPrompt = null;
+            installBtn.style.display = 'none';
+        });
+    }
+
+    window.addEventListener('appinstalled', () => {
+        console.log('[PWA] App installee');
+        if (installBtn) installBtn.style.display = 'none';
+    });
+
+    // Indicateur hors ligne
+    const offlineIndicator = document.getElementById('offline-indicator');
+    function updateOnlineStatus() {
+        if (offlineIndicator) {
+            offlineIndicator.style.display = navigator.onLine ? 'none' : 'inline-flex';
+        }
+    }
+    window.addEventListener('online', updateOnlineStatus);
+    window.addEventListener('offline', updateOnlineStatus);
+    updateOnlineStatus();
+    </script>
 </body>
 </html>
