@@ -21,7 +21,10 @@ const state = {
     paraphePage: 1,
     signatureHistory: [],  // historique pour undo signature
     parapheHistory: [],    // historique pour undo paraphe
-    previewVisible: false
+    previewVisible: false,
+    // Outils par cible: 'pen' | 'highlighter' | 'eraser'
+    signatureTool: 'pen',
+    parapheTool: 'pen'
 };
 
 // ==============================================
@@ -89,6 +92,45 @@ function unlockBodyScroll() {
     document.body.classList.remove('drawing-active');
     document.body.style.top = '';
     window.scrollTo(0, _savedScrollY);
+}
+
+// ==============================================
+// OUTILS DE DESSIN: stylo, surligneur, gomme
+// ==============================================
+function applyToolStyle(context, tool, color, width) {
+    context.save();
+    context.lineJoin = 'round';
+    context.lineCap = 'round';
+    if (tool === 'eraser') {
+        context.globalCompositeOperation = 'destination-out';
+        context.strokeStyle = 'rgba(0,0,0,1)';
+        context.globalAlpha = 1;
+        context.lineWidth = Math.max(width * 3, 8);
+    } else if (tool === 'highlighter') {
+        context.globalCompositeOperation = 'source-over';
+        context.strokeStyle = color;
+        context.globalAlpha = 0.35;
+        context.lineWidth = Math.max(width * 4, 12);
+        context.lineCap = 'square';
+        context.lineJoin = 'miter';
+    } else {
+        context.globalCompositeOperation = 'source-over';
+        context.strokeStyle = color;
+        context.globalAlpha = 1;
+        context.lineWidth = width;
+    }
+}
+
+function resetToolStyle(context) {
+    context.restore();
+}
+
+// Indicateur de curseur selon l'outil
+function updateCanvasCursor(canvas, tool) {
+    if (!canvas) return;
+    if (tool === 'eraser') canvas.style.cursor = 'cell';
+    else if (tool === 'highlighter') canvas.style.cursor = 'crosshair';
+    else canvas.style.cursor = 'crosshair';
 }
 
 // ==============================================
@@ -534,12 +576,13 @@ signatureCanvas.addEventListener('touchmove', (e) => {
     const x = (touch.clientX - rect.left) * scaleX;
     const y = (touch.clientY - rect.top) * scaleY;
 
-    ctx.strokeStyle = colorInput.value;
-    ctx.lineWidth = isMobile() ? Math.max(parseInt(widthInput.value), 2) : widthInput.value;
+    const w = isMobile() ? Math.max(parseInt(widthInput.value), 2) : parseInt(widthInput.value);
+    applyToolStyle(ctx, state.signatureTool, colorInput.value, w);
     ctx.beginPath();
     ctx.moveTo(lastX, lastY);
     ctx.lineTo(x, y);
     ctx.stroke();
+    resetToolStyle(ctx);
     lastX = x;
     lastY = y;
 }, { passive: false });
@@ -572,12 +615,12 @@ function draw(e) {
     const x = (e.clientX - rect.left) * scaleX;
     const y = (e.clientY - rect.top) * scaleY;
 
-    ctx.strokeStyle = colorInput.value;
-    ctx.lineWidth = widthInput.value;
+    applyToolStyle(ctx, state.signatureTool, colorInput.value, parseInt(widthInput.value));
     ctx.beginPath();
     ctx.moveTo(lastX, lastY);
     ctx.lineTo(x, y);
     ctx.stroke();
+    resetToolStyle(ctx);
     lastX = x;
     lastY = y;
 }
@@ -690,12 +733,13 @@ if (parapheCanvas) {
         const x = (touch.clientX - rect.left) * scaleX;
         const y = (touch.clientY - rect.top) * scaleY;
 
-        ctxParaphe.strokeStyle = parapheColorInput.value;
-        ctxParaphe.lineWidth = isMobile() ? Math.max(parseInt(parapheWidthInput.value), 2) : parapheWidthInput.value;
+        const w = isMobile() ? Math.max(parseInt(parapheWidthInput.value), 2) : parseInt(parapheWidthInput.value);
+        applyToolStyle(ctxParaphe, state.parapheTool, parapheColorInput.value, w);
         ctxParaphe.beginPath();
         ctxParaphe.moveTo(lastXParaphe, lastYParaphe);
         ctxParaphe.lineTo(x, y);
         ctxParaphe.stroke();
+        resetToolStyle(ctxParaphe);
         lastXParaphe = x;
         lastYParaphe = y;
     }, { passive: false });
@@ -728,12 +772,12 @@ function drawParaphe(e) {
     const x = (e.clientX - rect.left) * scaleX;
     const y = (e.clientY - rect.top) * scaleY;
 
-    ctxParaphe.strokeStyle = parapheColorInput.value;
-    ctxParaphe.lineWidth = parapheWidthInput.value;
+    applyToolStyle(ctxParaphe, state.parapheTool, parapheColorInput.value, parseInt(parapheWidthInput.value));
     ctxParaphe.beginPath();
     ctxParaphe.moveTo(lastXParaphe, lastYParaphe);
     ctxParaphe.lineTo(x, y);
     ctxParaphe.stroke();
+    resetToolStyle(ctxParaphe);
     lastXParaphe = x;
     lastYParaphe = y;
 }
@@ -1685,8 +1729,110 @@ sendEmailBtn.addEventListener('click', async () => {
 });
 
 // ==============================================
+// BARRE D'OUTILS (stylo / surligneur / gomme)
+// ==============================================
+document.querySelectorAll('.tools-bar').forEach(bar => {
+    const target = bar.dataset.tools; // 'signature' | 'paraphe'
+    bar.querySelectorAll('.tool-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            bar.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const tool = btn.dataset.tool;
+            if (target === 'signature') {
+                state.signatureTool = tool;
+                updateCanvasCursor(signatureCanvas, tool);
+            } else if (target === 'paraphe') {
+                state.parapheTool = tool;
+                updateCanvasCursor(parapheCanvas, tool);
+            }
+        });
+    });
+});
+
+// ==============================================
+// COLOR PRESETS (palettes rapides)
+// ==============================================
+document.querySelectorAll('.control-color').forEach(group => {
+    const target = group.dataset.target;
+    const picker = group.querySelector('.color-picker-custom');
+    const swatches = group.querySelectorAll('.color-swatch');
+
+    swatches.forEach(swatch => {
+        swatch.addEventListener('click', (e) => {
+            e.preventDefault();
+            const color = swatch.dataset.color;
+            swatches.forEach(s => s.classList.remove('active'));
+            swatch.classList.add('active');
+            if (picker) picker.value = color;
+            // Trigger change
+            if (target === 'signature' && colorInput) {
+                colorInput.value = color;
+                colorInput.dispatchEvent(new Event('input', { bubbles: true }));
+            } else if (target === 'paraphe' && parapheColorInput) {
+                parapheColorInput.value = color;
+                parapheColorInput.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+        });
+    });
+
+    if (picker) {
+        picker.addEventListener('input', () => {
+            swatches.forEach(s => s.classList.remove('active'));
+        });
+    }
+});
+
+// ==============================================
+// AFFICHAGE DE LA VALEUR D'EPAISSEUR
+// ==============================================
+const widthValueDisplay = document.getElementById('signature-width-value');
+const parapheWidthValueDisplay = document.getElementById('paraphe-width-value');
+
+if (widthInput && widthValueDisplay) {
+    widthInput.addEventListener('input', () => {
+        widthValueDisplay.textContent = widthInput.value;
+    });
+}
+if (parapheWidthInput && parapheWidthValueDisplay) {
+    parapheWidthInput.addEventListener('input', () => {
+        parapheWidthValueDisplay.textContent = parapheWidthInput.value;
+    });
+}
+
+// ==============================================
+// THEME TOGGLE (clair / sombre)
+// ==============================================
+const themeToggle = document.getElementById('theme-toggle');
+function applyTheme(theme) {
+    if (theme === 'dark') {
+        document.documentElement.setAttribute('data-theme', 'dark');
+    } else {
+        document.documentElement.removeAttribute('data-theme');
+    }
+    try { localStorage.setItem('theme', theme); } catch (e) {}
+}
+function loadTheme() {
+    let saved;
+    try { saved = localStorage.getItem('theme'); } catch (e) {}
+    if (saved) {
+        applyTheme(saved);
+    } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        applyTheme('dark');
+    }
+}
+if (themeToggle) {
+    themeToggle.addEventListener('click', () => {
+        const current = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+        applyTheme(current === 'dark' ? 'light' : 'dark');
+    });
+}
+
+// ==============================================
 // INITIALISATION
 // ==============================================
 window.addEventListener('DOMContentLoaded', () => {
+    loadTheme();
     loadFromCache();
+    updateCanvasCursor(signatureCanvas, state.signatureTool);
+    if (parapheCanvas) updateCanvasCursor(parapheCanvas, state.parapheTool);
 });
