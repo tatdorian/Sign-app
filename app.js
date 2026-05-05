@@ -75,6 +75,23 @@ function isPhone() {
 }
 
 // ==============================================
+// LOCK / UNLOCK SCROLL CORPS (fix iOS scroll-to-top)
+// ==============================================
+let _savedScrollY = 0;
+
+function lockBodyScroll() {
+    _savedScrollY = window.scrollY;
+    document.body.style.top = `-${_savedScrollY}px`;
+    document.body.classList.add('drawing-active');
+}
+
+function unlockBodyScroll() {
+    document.body.classList.remove('drawing-active');
+    document.body.style.top = '';
+    window.scrollTo(0, _savedScrollY);
+}
+
+// ==============================================
 // CANVAS RESPONSIVE
 // ==============================================
 let resizeTimeout;
@@ -85,10 +102,10 @@ function resizeCanvas() {
 
     if (isMobile()) {
         signatureCanvas.width = Math.max(200, containerWidth);
-        signatureCanvas.height = isPhone() ? 180 : 200;
+        signatureCanvas.height = isPhone() ? 220 : 240;
         if (parapheCanvas) {
             parapheCanvas.width = Math.max(200, containerWidth);
-            parapheCanvas.height = isPhone() ? 130 : 150;
+            parapheCanvas.height = isPhone() ? 160 : 180;
         }
     } else {
         signatureCanvas.width = 600;
@@ -400,25 +417,32 @@ async function loadPDF(file) {
 
     documentPreview.insertBefore(pagesContainer, documentPreview.firstChild);
 
-    // Positionner les overlays
+    // Positionner les overlays - couvrir toute la hauteur du document
     const signatureOverlay = document.getElementById('signature-overlay');
     const parapheOverlay = document.getElementById('paraphe-overlay');
 
-    if (signatureOverlay) {
-        signatureOverlay.style.position = 'absolute';
-        signatureOverlay.style.top = '0';
-        signatureOverlay.style.left = '0';
-        signatureOverlay.style.width = '100%';
-        signatureOverlay.style.pointerEvents = 'none';
-    }
+    // Attendre que le layout soit calcule avant de mesurer la hauteur
+    requestAnimationFrame(() => {
+        const totalHeight = pagesContainer.scrollHeight || pagesContainer.offsetHeight;
 
-    if (parapheOverlay) {
-        parapheOverlay.style.position = 'absolute';
-        parapheOverlay.style.top = '0';
-        parapheOverlay.style.left = '0';
-        parapheOverlay.style.width = '100%';
-        parapheOverlay.style.pointerEvents = 'none';
-    }
+        if (signatureOverlay) {
+            signatureOverlay.style.position = 'absolute';
+            signatureOverlay.style.top = '0';
+            signatureOverlay.style.left = '0';
+            signatureOverlay.style.width = '100%';
+            signatureOverlay.style.height = `${totalHeight}px`;
+            signatureOverlay.style.pointerEvents = 'none';
+        }
+
+        if (parapheOverlay) {
+            parapheOverlay.style.position = 'absolute';
+            parapheOverlay.style.top = '0';
+            parapheOverlay.style.left = '0';
+            parapheOverlay.style.width = '100%';
+            parapheOverlay.style.height = `${totalHeight}px`;
+            parapheOverlay.style.pointerEvents = 'none';
+        }
+    });
 
     state.totalPages = numPages;
     state.currentPage = 1;
@@ -489,8 +513,7 @@ signatureCanvas.addEventListener('mouseout', stopDrawing);
 
 signatureCanvas.addEventListener('touchstart', (e) => {
     e.preventDefault();
-    // Empecher le scroll pendant le dessin
-    document.body.classList.add('drawing-active');
+    lockBodyScroll();
     state.signatureHistory.push(signatureCanvas.toDataURL());
     const touch = e.touches[0];
     const rect = signatureCanvas.getBoundingClientRect();
@@ -523,7 +546,7 @@ signatureCanvas.addEventListener('touchmove', (e) => {
 
 signatureCanvas.addEventListener('touchend', (e) => {
     e.preventDefault();
-    document.body.classList.remove('drawing-active');
+    unlockBodyScroll();
     state.isDrawing = false;
     state.signatureData = signatureCanvas.toDataURL();
     saveToCache();
@@ -646,8 +669,7 @@ if (parapheCanvas) {
 
     parapheCanvas.addEventListener('touchstart', (e) => {
         e.preventDefault();
-        // Empecher le scroll pendant le dessin
-        document.body.classList.add('drawing-active');
+        lockBodyScroll();
         state.parapheHistory.push(parapheCanvas.toDataURL());
         const touch = e.touches[0];
         const rect = parapheCanvas.getBoundingClientRect();
@@ -680,7 +702,7 @@ if (parapheCanvas) {
 
     parapheCanvas.addEventListener('touchend', (e) => {
         e.preventDefault();
-        document.body.classList.remove('drawing-active');
+        unlockBodyScroll();
         state.isDrawingParaphe = false;
         state.parapheData = parapheCanvas.toDataURL();
         saveToCache();
@@ -934,10 +956,11 @@ if (paraphePreview) {
     paraphePreview.addEventListener('mousedown', startDragParaphe);
     paraphePreview.addEventListener('touchstart', (e) => {
         if (e.touches.length === 1) {
+            e.preventDefault();
             const touch = e.touches[0];
             startDragParaphe({ clientX: touch.clientX, clientY: touch.clientY });
         }
-    });
+    }, { passive: false });
 }
 
 document.addEventListener('mousemove', dragParaphe);
@@ -1085,9 +1108,10 @@ document.addEventListener('mouseup', stopDrag);
 
 signaturePreview.addEventListener('touchstart', (e) => {
     if (e.touches.length === 1) {
+        e.preventDefault();
         startDrag({ clientX: e.touches[0].clientX, clientY: e.touches[0].clientY });
     }
-});
+}, { passive: false });
 
 document.addEventListener('touchmove', (e) => {
     if (isDragging && e.touches.length === 1) {
