@@ -1294,8 +1294,22 @@ documentPreview.addEventListener('touchmove', (e) => {
         clearTimeout(_lpTimer); _lpTimer = null;
     }
 }, { passive: true });
-documentPreview.addEventListener('touchend', () => {
+let _lastTapSigEl = null;
+let _lastTapTime = 0;
+documentPreview.addEventListener('touchend', (e) => {
     if (_lpTimer !== null) { clearTimeout(_lpTimer); _lpTimer = null; }
+    if (!e.changedTouches.length) return;
+    const t = e.changedTouches[0];
+    const el = document.elementFromPoint(t.clientX, t.clientY);
+    const sigEl = el?.closest?.('.signature-draggable');
+    const now = Date.now();
+    if (sigEl && sigEl === _lastTapSigEl && now - _lastTapTime < 350) {
+        removePlacedSignature(sigEl);
+        _lastTapSigEl = null; _lastTapTime = 0;
+    } else {
+        _lastTapSigEl = sigEl || null;
+        _lastTapTime = now;
+    }
 }, { passive: true });
 
 function constrainSignaturePosition() {
@@ -1476,7 +1490,6 @@ async function createSignedPDF() {
         pdfDoc = await PDFDocument.load(state.originalPdfBytes);
     } else {
         pdfDoc = await PDFDocument.create();
-        const page = pdfDoc.addPage([595, 842]); // A4
 
         if (state.uploadedFileType === 'image') {
             const imgData = await state.uploadedFile.arrayBuffer();
@@ -1486,13 +1499,15 @@ async function createSignedPDF() {
             } else {
                 image = await pdfDoc.embedJpg(imgData);
             }
-            const imgDims = image.scale(0.5);
-            page.drawImage(image, {
-                x: 50,
-                y: page.getHeight() - imgDims.height - 50,
-                width: imgDims.width,
-                height: imgDims.height,
-            });
+            // Conserver les proportions et dimensions d'origine de l'image
+            const { width: iw, height: ih } = image;
+            // Limiter à 1200 pts max (raisonnable pour PDF) tout en gardant le ratio
+            const maxPts = 1200;
+            const s = (iw > maxPts || ih > maxPts) ? Math.min(maxPts / iw, maxPts / ih) : 1;
+            const pw = Math.round(iw * s);
+            const ph = Math.round(ih * s);
+            const page = pdfDoc.addPage([pw, ph]);
+            page.drawImage(image, { x: 0, y: 0, width: pw, height: ph });
         }
     }
 
