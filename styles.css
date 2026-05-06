@@ -495,7 +495,7 @@ main { display: flex; flex-direction: column; gap: 14px; }
    BARRE D'ANNOTATION (surligneur sur document)
    ============================================= */
 .annotation-toolbar {
-    display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+    display: flex; flex-direction: column; gap: 8px;
     padding: 10px 14px;
     margin-top: 8px;
     background: var(--bg-subtle);
@@ -503,6 +503,10 @@ main { display: flex; flex-direction: column; gap: 14px; }
     border: 1.5px solid var(--yellow);
     border-left: 4px solid var(--yellow);
 }
+
+.annot-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.annot-row-sliders { gap: 14px; }
+.annot-colors { display: flex; gap: 5px; align-items: center; }
 
 .annotation-tools { display: flex; gap: 6px; }
 
@@ -1012,9 +1016,8 @@ footer {
     .tool-btn span { display: block; font-size: .65em; }
     .tool-btn svg { width: 16px; height: 16px; }
 
-    .annotation-toolbar { flex-direction: column; align-items: flex-start; }
-    .annotation-controls { width: 100%; }
-    .annot-size-wrap input[type="range"] { width: 90px; }
+    .annot-row { flex-wrap: wrap; }
+    .annot-size-wrap input[type="range"] { width: 110px; }
 }
 
 /* =============================================

@@ -223,7 +223,20 @@ function handleDrop(e) {
     }
 }
 
-dropZone.addEventListener('click', () => fileInput.click());
+// "Parcourir" déclenche le sélecteur de fichier — le click du bouton
+// remonte à dropZone, donc on gère tout ici (pas de double déclenchement).
+dropZone.addEventListener('click', (e) => {
+    // Ignorer les clics qui viennent d'éléments interactifs internes
+    // autres que le bouton de navigation (swatches, sliders…)
+    fileInput.click();
+});
+const browseBtn = document.getElementById('browse-btn');
+if (browseBtn) {
+    browseBtn.addEventListener('click', (e) => {
+        e.stopPropagation(); // évite le double déclenchement via dropZone
+        fileInput.click();
+    });
+}
 
 async function handleFileUpload(e) {
     const file = e.target.files[0];
@@ -1759,6 +1772,9 @@ function setAnnotationMode(active) {
     annotationMode = active;
     if (active) {
         documentPreview.classList.add('annotation-mode');
+        documentPreview.addEventListener('touchstart', _annotTouchStart, { passive: false });
+        documentPreview.addEventListener('touchmove',  _annotTouchMove,  { passive: false });
+        documentPreview.addEventListener('touchend',   _annotTouchEnd);
         if (annotToolbar) annotToolbar.style.display = 'flex';
         if (toggleAnnotBtn) {
             toggleAnnotBtn.style.background = 'rgba(255,214,10,.35)';
@@ -1768,6 +1784,12 @@ function setAnnotationMode(active) {
     } else {
         documentPreview.classList.remove('annotation-mode');
         documentPreview.classList.remove('erase-mode');
+        documentPreview.removeEventListener('touchstart', _annotTouchStart);
+        documentPreview.removeEventListener('touchmove',  _annotTouchMove);
+        documentPreview.removeEventListener('touchend',   _annotTouchEnd);
+        isAnnotating = false;
+        currentAnnotCanvas = null;
+        twoFingerLastY = null;
         if (annotToolbar) annotToolbar.style.display = 'none';
         if (toggleAnnotBtn) {
             toggleAnnotBtn.style.background = '';
@@ -1818,8 +1840,12 @@ if (annotSizeInput) {
 }
 
 const annotOpacityInput = document.getElementById('annot-opacity');
+const annotOpacityVal = document.getElementById('annot-opacity-val');
 if (annotOpacityInput) {
-    annotOpacityInput.addEventListener('input', () => { annotOpacity = parseInt(annotOpacityInput.value) / 100; });
+    annotOpacityInput.addEventListener('input', () => {
+        annotOpacity = parseInt(annotOpacityInput.value) / 100;
+        if (annotOpacityVal) annotOpacityVal.textContent = annotOpacityInput.value + '%';
+    });
 }
 
 if (annotClearBtn) {
@@ -1898,10 +1924,10 @@ documentPreview.addEventListener('mousemove', (e) => {
 
 document.addEventListener('mouseup', () => { isAnnotating = false; currentAnnotCanvas = null; });
 
-documentPreview.addEventListener('touchstart', (e) => {
-    if (!annotationMode) return;
+// Touch handlers for annotation — added/removed dynamically so they NEVER
+// block native scroll when annotation mode is off (passive listeners allow scroll).
+function _annotTouchStart(e) {
     if (e.touches.length === 2) {
-        // 2 fingers: prepare for manual scroll
         isAnnotating = false;
         currentAnnotCanvas = null;
         twoFingerLastY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
@@ -1917,20 +1943,19 @@ documentPreview.addEventListener('touchstart', (e) => {
     if (!currentAnnotCanvas) return;
     isAnnotating = true;
     const rect = currentAnnotCanvas.getBoundingClientRect();
-    const scaleX = currentAnnotCanvas.width / rect.width;
-    const scaleY = currentAnnotCanvas.height / rect.height;
-    annotLastX = (touch.clientX - rect.left) * scaleX;
-    annotLastY = (touch.clientY - rect.top) * scaleY;
+    annotLastX = (touch.clientX - rect.left) * (currentAnnotCanvas.width / rect.width);
+    annotLastY = (touch.clientY - rect.top)  * (currentAnnotCanvas.height / rect.height);
     e.preventDefault();
-}, { passive: false });
+}
 
-documentPreview.addEventListener('touchmove', (e) => {
-    if (!annotationMode) return;
+function _annotTouchMove(e) {
     if (e.touches.length === 2) {
-        // 2 fingers: scroll the page
         const centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
         if (twoFingerLastY !== null) {
-            window.scrollBy(0, twoFingerLastY - centerY);
+            // Instant scroll to avoid conflict with css scroll-behavior:smooth
+            const delta = twoFingerLastY - centerY;
+            document.documentElement.scrollTop += delta;
+            document.body.scrollTop += delta;
         }
         twoFingerLastY = centerY;
         e.preventDefault();
@@ -1939,20 +1964,18 @@ documentPreview.addEventListener('touchmove', (e) => {
     if (!isAnnotating || !currentAnnotCanvas || e.touches.length !== 1) return;
     const touch = e.touches[0];
     const rect = currentAnnotCanvas.getBoundingClientRect();
-    const scaleX = currentAnnotCanvas.width / rect.width;
-    const scaleY = currentAnnotCanvas.height / rect.height;
-    const x = (touch.clientX - rect.left) * scaleX;
-    const y = (touch.clientY - rect.top) * scaleY;
+    const x = (touch.clientX - rect.left) * (currentAnnotCanvas.width / rect.width);
+    const y = (touch.clientY - rect.top)  * (currentAnnotCanvas.height / rect.height);
     annotDraw(currentAnnotCanvas.getContext('2d'), annotLastX, annotLastY, x, y);
     annotLastX = x; annotLastY = y;
     e.preventDefault();
-}, { passive: false });
+}
 
-documentPreview.addEventListener('touchend', () => {
+function _annotTouchEnd() {
     isAnnotating = false;
     currentAnnotCanvas = null;
     twoFingerLastY = null;
-});
+}
 
 // ==============================================
 // BARRE D'OUTILS (stylo / surligneur / gomme)
