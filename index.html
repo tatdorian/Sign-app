@@ -37,6 +37,35 @@
         <span>Hors ligne</span>
     </div>
 
+    <!-- Modal guide installation iOS -->
+    <div id="ios-install-modal" class="ios-install-modal" style="display:none" role="dialog" aria-modal="true" aria-label="Installer l'application">
+        <div class="ios-install-card">
+            <button class="ios-install-close" id="ios-install-close" aria-label="Fermer">✕</button>
+            <div class="ios-install-icon">
+                <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17.5V21h3.5L17 10.5 13.5 7 3 17.5z"/><path d="M14.5 6L18 9.5"/></svg>
+            </div>
+            <h2 class="ios-install-title">Installer Signature</h2>
+            <p class="ios-install-sub">Ajoutez l'app à votre écran d'accueil pour l'utiliser comme une vraie application.</p>
+            <ol class="ios-install-steps">
+                <li>
+                    <span class="ios-step-num">1</span>
+                    <span>Appuyez sur le bouton <strong>Partager</strong>
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin:0 2px"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                        en bas de Safari</span>
+                </li>
+                <li>
+                    <span class="ios-step-num">2</span>
+                    <span>Faites défiler et appuyez sur <strong>« Sur l'écran d'accueil »</strong></span>
+                </li>
+                <li>
+                    <span class="ios-step-num">3</span>
+                    <span>Appuyez sur <strong>Ajouter</strong> en haut à droite</span>
+                </li>
+            </ol>
+            <div class="ios-install-arrow">▼</div>
+        </div>
+    </div>
+
     <div class="container">
         <header>
             <div class="brand">
@@ -352,6 +381,17 @@
     // Bouton "Installer l'app"
     let deferredInstallPrompt = null;
     const installBtn = document.getElementById('install-btn');
+    const iosModal = document.getElementById('ios-install-modal');
+    const iosClose = document.getElementById('ios-install-close');
+
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    const isStandalone = window.navigator.standalone === true
+        || window.matchMedia('(display-mode: standalone)').matches;
+
+    // Sur iOS Safari: montrer le bouton d'installation immédiatement (pas de beforeinstallprompt)
+    if (isIOS && !isStandalone && installBtn) {
+        installBtn.style.display = 'inline-flex';
+    }
 
     window.addEventListener('beforeinstallprompt', (e) => {
         e.preventDefault();
@@ -361,21 +401,24 @@
 
     if (installBtn) {
         installBtn.addEventListener('click', async () => {
-            if (!deferredInstallPrompt) {
-                // iOS: pas de prompt, afficher instructions
-                const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-                if (isIOS) {
-                    alert("Pour installer sur iPhone/iPad : appuyez sur le bouton Partager puis 'Sur l'ecran d'accueil'.");
-                } else {
-                    alert("L'application est deja installee, ou votre navigateur ne supporte pas l'installation. Sur Chrome/Edge, cherchez l'icone d'installation dans la barre d'adresse.");
-                }
+            if (isIOS) {
+                // iOS: afficher le guide visuel
+                if (iosModal) iosModal.style.display = 'flex';
                 return;
             }
+            if (!deferredInstallPrompt) return;
             deferredInstallPrompt.prompt();
             const { outcome } = await deferredInstallPrompt.userChoice;
             console.log('[PWA] Choix installation:', outcome);
             deferredInstallPrompt = null;
             installBtn.style.display = 'none';
+        });
+    }
+
+    if (iosClose && iosModal) {
+        iosClose.addEventListener('click', () => { iosModal.style.display = 'none'; });
+        iosModal.addEventListener('click', (e) => {
+            if (e.target === iosModal) iosModal.style.display = 'none';
         });
     }
 
