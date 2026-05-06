@@ -487,6 +487,19 @@ main { display: flex; flex-direction: column; gap: 14px; }
 }
 .annot-clear-btn:hover { background: rgba(255,59,48,.2); }
 
+.annot-scroll-hint {
+    width: 100%;
+    text-align: center;
+    font-size: .72em;
+    color: var(--label-3);
+    margin: 2px 0 0;
+    padding: 0;
+    display: none;
+}
+@media (hover: none) and (pointer: coarse) {
+    .annot-scroll-hint { display: block; }
+}
+
 /* =============================================
    DOCUMENT PREVIEW
    ============================================= */

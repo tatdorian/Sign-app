@@ -1764,8 +1764,10 @@ let annotationMode = false;
 let annotationEraseMode = false;
 let annotColor = '#FFD60A';
 let annotSize = 22;
+let annotOpacity = 0.42;
 let isAnnotating = false;
 let annotLastX = 0, annotLastY = 0;
+let twoFingerLastY = null;
 
 const annotToolbar = document.getElementById('annotation-toolbar');
 const toggleAnnotBtn = document.getElementById('toggle-annotation-btn');
@@ -1836,6 +1838,11 @@ if (annotSizeInput) {
     annotSizeInput.addEventListener('input', () => { annotSize = parseInt(annotSizeInput.value); });
 }
 
+const annotOpacityInput = document.getElementById('annot-opacity');
+if (annotOpacityInput) {
+    annotOpacityInput.addEventListener('input', () => { annotOpacity = parseInt(annotOpacityInput.value) / 100; });
+}
+
 if (annotClearBtn) {
     annotClearBtn.addEventListener('click', () => {
         document.querySelectorAll('.annotation-canvas').forEach(c => {
@@ -1870,7 +1877,7 @@ function annotDraw(annotCtx, fromX, fromY, toX, toY) {
     } else {
         annotCtx.save();
         annotCtx.globalCompositeOperation = 'source-over';
-        annotCtx.globalAlpha = 0.42;
+        annotCtx.globalAlpha = annotOpacity;
         annotCtx.strokeStyle = annotColor;
         annotCtx.lineWidth = annotSize;
         annotCtx.lineCap = 'square'; annotCtx.lineJoin = 'miter';
@@ -1913,8 +1920,17 @@ documentPreview.addEventListener('mousemove', (e) => {
 document.addEventListener('mouseup', () => { isAnnotating = false; currentAnnotCanvas = null; });
 
 documentPreview.addEventListener('touchstart', (e) => {
-    if (!annotationMode || e.touches.length !== 1) return;
-    lockBodyScroll();
+    if (!annotationMode) return;
+    if (e.touches.length === 2) {
+        // 2 fingers: prepare for manual scroll
+        isAnnotating = false;
+        currentAnnotCanvas = null;
+        twoFingerLastY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        e.preventDefault();
+        return;
+    }
+    if (e.touches.length !== 1) return;
+    twoFingerLastY = null;
     const touch = e.touches[0];
     const pageContainer = document.elementFromPoint(touch.clientX, touch.clientY)?.closest('.pdf-page-container');
     currentAnnotCanvas = pageContainer?.querySelector('.annotation-canvas')
@@ -1930,7 +1946,18 @@ documentPreview.addEventListener('touchstart', (e) => {
 }, { passive: false });
 
 documentPreview.addEventListener('touchmove', (e) => {
-    if (!annotationMode || !isAnnotating || !currentAnnotCanvas || e.touches.length !== 1) return;
+    if (!annotationMode) return;
+    if (e.touches.length === 2) {
+        // 2 fingers: scroll the page
+        const centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        if (twoFingerLastY !== null) {
+            window.scrollBy(0, twoFingerLastY - centerY);
+        }
+        twoFingerLastY = centerY;
+        e.preventDefault();
+        return;
+    }
+    if (!isAnnotating || !currentAnnotCanvas || e.touches.length !== 1) return;
     const touch = e.touches[0];
     const rect = currentAnnotCanvas.getBoundingClientRect();
     const scaleX = currentAnnotCanvas.width / rect.width;
@@ -1945,7 +1972,7 @@ documentPreview.addEventListener('touchmove', (e) => {
 documentPreview.addEventListener('touchend', () => {
     isAnnotating = false;
     currentAnnotCanvas = null;
-    unlockBodyScroll();
+    twoFingerLastY = null;
 });
 
 // ==============================================
