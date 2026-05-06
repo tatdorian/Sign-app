@@ -696,12 +696,16 @@ function showSignatureOnDocument() {
     if (state.signatureData && signaturePreview && signatureOverlay) {
         signaturePreview.src = state.signatureData;
         signaturePreview.onload = () => {
+            const _sy = window.scrollY;
             signatureOverlay.style.display = 'block';
             updateSignaturePreviewPosition();
+            if (window.scrollY !== _sy) document.documentElement.scrollTop = _sy;
         };
         if (signaturePreview.complete) {
+            const _sy = window.scrollY;
             signatureOverlay.style.display = 'block';
             updateSignaturePreviewPosition();
+            if (window.scrollY !== _sy) document.documentElement.scrollTop = _sy;
         }
     }
 }
@@ -879,11 +883,14 @@ function showParapheOnDocument() {
     if (state.parapheData && paraphePreview && parapheOverlay) {
         paraphePreview.src = state.parapheData;
         paraphePreview.onload = () => {
+            const _sy = window.scrollY;
             parapheOverlay.style.display = 'block';
             updateParaphePreviewPosition();
             createParapheClones();
+            if (window.scrollY !== _sy) document.documentElement.scrollTop = _sy;
         };
         if (paraphePreview.complete) {
+            const _sy = window.scrollY;
             parapheOverlay.style.display = 'block';
             updateParaphePreviewPosition();
             createParapheClones();
@@ -1020,13 +1027,13 @@ if (paraphePreview) {
 document.addEventListener('mousemove', dragParaphe);
 document.addEventListener('mouseup', stopDragParaphe);
 
-document.addEventListener('touchmove', (e) => {
+function _parTouchMove(e) {
     if (isDraggingParaphe && e.touches.length === 1) {
         e.preventDefault();
         dragParaphe({ clientX: e.touches[0].clientX, clientY: e.touches[0].clientY });
     }
-});
-
+}
+document.addEventListener('touchmove', _parTouchMove, { passive: false });
 document.addEventListener('touchend', stopDragParaphe);
 
 function constrainParaphePosition() {
@@ -1167,13 +1174,13 @@ signaturePreview.addEventListener('touchstart', (e) => {
     }
 }, { passive: false });
 
-document.addEventListener('touchmove', (e) => {
+function _sigTouchMove(e) {
     if (isDragging && e.touches.length === 1) {
         e.preventDefault();
         drag({ clientX: e.touches[0].clientX, clientY: e.touches[0].clientY });
     }
-});
-
+}
+document.addEventListener('touchmove', _sigTouchMove, { passive: false });
 document.addEventListener('touchend', stopDrag);
 
 function constrainSignaturePosition() {
