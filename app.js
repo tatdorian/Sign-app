@@ -593,9 +593,15 @@ signatureCanvas.addEventListener('touchmove', (e) => {
 signatureCanvas.addEventListener('touchend', (e) => {
     e.preventDefault();
     state.isDrawing = false;
-    state.signatureData = signatureCanvas.toDataURL();
-    saveToCache();
-    showSignatureOnDocument();
+    const _sy = window.scrollY;
+    // Defer heavy work (toDataURL + localStorage write) to next frame
+    // so iOS cannot use the synchronous block to reset scroll position.
+    requestAnimationFrame(() => {
+        state.signatureData = signatureCanvas.toDataURL();
+        saveToCache();
+        showSignatureOnDocument();
+        if (window.scrollY !== _sy) document.documentElement.scrollTop = _sy;
+    });
 }, { passive: false });
 
 function startDrawing(e) {
@@ -748,9 +754,13 @@ if (parapheCanvas) {
     parapheCanvas.addEventListener('touchend', (e) => {
         e.preventDefault();
         state.isDrawingParaphe = false;
-        state.parapheData = parapheCanvas.toDataURL();
-        saveToCache();
-        showParapheOnDocument();
+        const _sy = window.scrollY;
+        requestAnimationFrame(() => {
+            state.parapheData = parapheCanvas.toDataURL();
+            saveToCache();
+            showParapheOnDocument();
+            if (window.scrollY !== _sy) document.documentElement.scrollTop = _sy;
+        });
     }, { passive: false });
 }
 
