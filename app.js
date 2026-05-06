@@ -15,8 +15,6 @@ const state = {
     totalPages: 1,
     currentPage: 1,
     signaturePage: 1,
-    signaturePageMode: 'current', // 'current', 'all', 'custom'
-    signatureCustomPages: [],     // pages selectionees en mode custom
     paraphePosition: { x: 50, y: 50 },
     paraphePage: 1,
     signatureHistory: [],  // historique pour undo signature
@@ -298,7 +296,6 @@ async function handleFileUpload(e) {
         if (toolbar) toolbar.style.display = 'flex';
 
         // Afficher page selector si multi-pages
-        updatePageSelector();
 
         // Si une signature/paraphe cache existe, l'afficher
         setTimeout(() => {
@@ -327,8 +324,6 @@ if (newDocBtn) {
         state.totalPages = 1;
         state.currentPage = 1;
         state.signaturePage = 1;
-        state.signaturePageMode = 'current';
-        state.signatureCustomPages = [];
 
         // Reset overlays
         const signatureOverlay = document.getElementById('signature-overlay');
@@ -360,10 +355,8 @@ if (newDocBtn) {
         // Masquer les controls
         const sizeControl = document.getElementById('signature-size-control');
         const toolbar = document.getElementById('doc-toolbar');
-        const pageSelector = document.getElementById('page-selector-panel');
         if (sizeControl) sizeControl.style.display = 'none';
         if (toolbar) toolbar.style.display = 'none';
-        if (pageSelector) pageSelector.style.display = 'none';
 
         // Remettre la zone d'upload visible
         dropZone.style.display = '';
@@ -999,6 +992,8 @@ if (paraphePreview) {
             e.preventDefault();
             const touch = e.touches[0];
             startDragParaphe({ clientX: touch.clientX, clientY: touch.clientY });
+            document.addEventListener('touchmove', _parTouchMove, { passive: false });
+            document.addEventListener('touchend', _parTouchEnd);
         }
     }, { passive: false });
 }
@@ -1007,13 +1002,16 @@ document.addEventListener('mousemove', dragParaphe);
 document.addEventListener('mouseup', stopDragParaphe);
 
 function _parTouchMove(e) {
-    if (isDraggingParaphe && e.touches.length === 1) {
+    if (e.touches.length === 1) {
         e.preventDefault();
         dragParaphe({ clientX: e.touches[0].clientX, clientY: e.touches[0].clientY });
     }
 }
-document.addEventListener('touchmove', _parTouchMove, { passive: false });
-document.addEventListener('touchend', stopDragParaphe);
+function _parTouchEnd() {
+    stopDragParaphe();
+    document.removeEventListener('touchmove', _parTouchMove);
+    document.removeEventListener('touchend', _parTouchEnd);
+}
 
 function constrainParaphePosition() {
     const paraphePreview = document.getElementById('paraphe-preview');
@@ -1142,25 +1140,75 @@ if (signatureSizeSlider && sizeValueDisplay) {
     });
 }
 
+// Place la signature centrée sur un point (coordonnées clientX/Y)
+function placeSignatureAt(clientX, clientY) {
+    if (!signaturePreview || !signatureOverlay || !state.signatureData) return;
+    const containerRect = documentPreview.getBoundingClientRect();
+    const x = clientX - containerRect.left - signaturePreview.offsetWidth / 2;
+    const y = clientY - containerRect.top  - signaturePreview.offsetHeight / 2;
+    signaturePreview.style.left = `${Math.max(0, x)}px`;
+    signaturePreview.style.top  = `${Math.max(0, y)}px`;
+    constrainSignaturePosition();
+    detectSignaturePage();
+}
+
 signaturePreview.addEventListener('mousedown', startDrag);
 document.addEventListener('mousemove', drag);
 document.addEventListener('mouseup', stopDrag);
+
+// Drag touch — listeners ajoutés/retirés dynamiquement pour ne pas
+// bloquer le scroll natif quand on ne fait que scroller
+function _sigTouchMove(e) {
+    if (e.touches.length === 1) {
+        e.preventDefault();
+        drag({ clientX: e.touches[0].clientX, clientY: e.touches[0].clientY });
+    }
+}
+function _sigTouchEnd() {
+    stopDrag();
+    document.removeEventListener('touchmove', _sigTouchMove);
+    document.removeEventListener('touchend', _sigTouchEnd);
+}
 
 signaturePreview.addEventListener('touchstart', (e) => {
     if (e.touches.length === 1) {
         e.preventDefault();
         startDrag({ clientX: e.touches[0].clientX, clientY: e.touches[0].clientY });
+        document.addEventListener('touchmove', _sigTouchMove, { passive: false });
+        document.addEventListener('touchend', _sigTouchEnd);
     }
 }, { passive: false });
 
-function _sigTouchMove(e) {
-    if (isDragging && e.touches.length === 1) {
-        e.preventDefault();
-        drag({ clientX: e.touches[0].clientX, clientY: e.touches[0].clientY });
+// Double-clic (bureau) → téléporter la signature à l'endroit cliqué
+documentPreview.addEventListener('dblclick', (e) => {
+    if (!state.signatureData) return;
+    if (e.target.closest('.signature-draggable, .paraphe-draggable, .annotation-canvas')) return;
+    placeSignatureAt(e.clientX, e.clientY);
+});
+
+// Appui long (mobile) → téléporter la signature
+let _lpTimer = null;
+let _lpStartX = 0, _lpStartY = 0;
+documentPreview.addEventListener('touchstart', (e) => {
+    if (!state.signatureData || e.touches.length !== 1) return;
+    if (e.target.closest('.signature-draggable, .paraphe-draggable')) return;
+    const t = e.touches[0];
+    _lpStartX = t.clientX; _lpStartY = t.clientY;
+    _lpTimer = setTimeout(() => {
+        _lpTimer = null;
+        placeSignatureAt(t.clientX, t.clientY);
+    }, 500);
+}, { passive: true });
+documentPreview.addEventListener('touchmove', (e) => {
+    if (_lpTimer === null) return;
+    const t = e.touches[0];
+    if (Math.abs(t.clientX - _lpStartX) > 8 || Math.abs(t.clientY - _lpStartY) > 8) {
+        clearTimeout(_lpTimer); _lpTimer = null;
     }
-}
-document.addEventListener('touchmove', _sigTouchMove, { passive: false });
-document.addEventListener('touchend', stopDrag);
+}, { passive: true });
+documentPreview.addEventListener('touchend', () => {
+    if (_lpTimer !== null) { clearTimeout(_lpTimer); _lpTimer = null; }
+}, { passive: true });
 
 function constrainSignaturePosition() {
     if (!signaturePreview || !documentPreview) return;
@@ -1231,7 +1279,6 @@ function stopDrag() {
         isDragging = false;
         signaturePreview.style.cursor = 'move';
         detectSignaturePage();
-        updateCurrentPageDisplay();
     }
 }
 
@@ -1290,98 +1337,8 @@ function detectSignaturePage() {
     return 1;
 }
 
-// ==============================================
-// PAGE SELECTOR
-// ==============================================
-function updatePageSelector() {
-    const panel = document.getElementById('page-selector-panel');
-    if (!panel) return;
-
-    if (state.totalPages > 1) {
-        panel.style.display = 'block';
-        buildCustomPageCheckboxes();
-    } else {
-        panel.style.display = 'none';
-    }
-}
-
-function buildCustomPageCheckboxes() {
-    const container = document.getElementById('custom-pages-container');
-    if (!container) return;
-    container.innerHTML = '';
-
-    for (let i = 1; i <= state.totalPages; i++) {
-        const label = document.createElement('label');
-        label.className = 'page-checkbox';
-
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.value = i;
-        checkbox.dataset.pageNum = i;
-        // Par defaut cocher la page actuelle
-        if (i === state.signaturePage) {
-            checkbox.checked = true;
-            label.classList.add('checked');
-        }
-
-        checkbox.addEventListener('change', (e) => {
-            if (e.target.checked) {
-                label.classList.add('checked');
-            } else {
-                label.classList.remove('checked');
-            }
-            updateCustomPagesState();
-        });
-
-        const span = document.createElement('span');
-        span.textContent = `Page ${i}`;
-
-        label.appendChild(checkbox);
-        label.appendChild(span);
-        container.appendChild(label);
-    }
-
-    updateCustomPagesState();
-}
-
-function updateCustomPagesState() {
-    const container = document.getElementById('custom-pages-container');
-    if (!container) return;
-    const checked = container.querySelectorAll('input[type="checkbox"]:checked');
-    state.signatureCustomPages = Array.from(checked).map(cb => parseInt(cb.value));
-}
-
-function updateCurrentPageDisplay() {
-    const display = document.getElementById('current-page-display');
-    if (display) {
-        display.textContent = state.signaturePage;
-    }
-}
-
-// Event listeners pour les radio buttons du page selector
-document.querySelectorAll('input[name="sig-page-mode"]').forEach(radio => {
-    radio.addEventListener('change', (e) => {
-        state.signaturePageMode = e.target.value;
-        const customContainer = document.getElementById('custom-pages-container');
-        if (customContainer) {
-            customContainer.style.display = e.target.value === 'custom' ? 'flex' : 'none';
-        }
-    });
-});
-
-// Obtenir les pages cibles pour la signature
 function getSignatureTargetPages() {
-    switch (state.signaturePageMode) {
-        case 'all':
-            return Array.from({ length: state.totalPages }, (_, i) => i + 1);
-        case 'custom':
-            return state.signatureCustomPages.length > 0
-                ? state.signatureCustomPages
-                : [state.signaturePage];
-        case 'current':
-        default:
-            return [state.signaturePage];
-    }
+    return [state.signaturePage];
 }
 
 
