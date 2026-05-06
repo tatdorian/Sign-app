@@ -188,6 +188,58 @@ body {
     to   { opacity: 1; transform: translate(-50%, 0); }
 }
 
+/* iOS Safari install banner (bottom of screen) */
+.ios-safari-banner {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    z-index: 9998;
+    padding: 0 0 env(safe-area-inset-bottom, 0);
+    animation: slideUp .4s cubic-bezier(.32,1,.28,1);
+}
+.ios-safari-banner-content {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--surface-2);
+    border-top: 1px solid var(--separator);
+    padding: 12px 16px;
+    box-shadow: 0 -4px 20px rgba(0,0,0,.12);
+}
+.ios-safari-banner-icon {
+    width: 40px; height: 40px; flex-shrink: 0;
+    background: linear-gradient(135deg, #0A84FF, #0066d6);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff;
+}
+.ios-safari-banner-text {
+    flex: 1; display: flex; flex-direction: column; gap: 2px;
+    font-size: .84em;
+}
+.ios-safari-banner-text strong { color: var(--label); }
+.ios-safari-banner-text span { color: var(--label-2); }
+.ios-safari-banner-text em { font-style: normal; font-weight: 600; }
+.ios-safari-banner-close {
+    background: var(--surface-3); border: none;
+    width: 26px; height: 26px; border-radius: 50%;
+    font-size: .8em; color: var(--label-3);
+    cursor: pointer; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-family: inherit;
+}
+.ios-safari-banner-arrow {
+    text-align: center;
+    font-size: 1.1em; color: var(--blue);
+    padding: 2px 0 4px;
+    animation: bounce .9s infinite alternate ease-in-out;
+}
+.ios-copy-link-btn {
+    display: flex; align-items: center; gap: 8px; justify-content: center;
+    width: 100%; margin-top: 16px;
+    padding: 12px;
+    background: var(--blue); color: #fff;
+    border: none; border-radius: 12px;
+    font-size: .92em; font-weight: 600;
+    cursor: pointer; font-family: inherit;
+}
+
 /* iOS install guide modal */
 .ios-install-modal {
     position: fixed; inset: 0;
