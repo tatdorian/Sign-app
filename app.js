@@ -593,15 +593,8 @@ signatureCanvas.addEventListener('touchmove', (e) => {
 signatureCanvas.addEventListener('touchend', (e) => {
     e.preventDefault();
     state.isDrawing = false;
-    const _sy = window.scrollY;
-    // Defer heavy work (toDataURL + localStorage write) to next frame
-    // so iOS cannot use the synchronous block to reset scroll position.
-    requestAnimationFrame(() => {
-        state.signatureData = signatureCanvas.toDataURL();
-        saveToCache();
-        showSignatureOnDocument();
-        if (window.scrollY !== _sy) document.documentElement.scrollTop = _sy;
-    });
+    state.signatureData = signatureCanvas.toDataURL();
+    showSignatureOnDocument();
 }, { passive: false });
 
 function startDrawing(e) {
@@ -633,12 +626,10 @@ function draw(e) {
     lastY = y;
 }
 
-async function stopDrawing() {
+function stopDrawing() {
     if (state.isDrawing) {
         state.isDrawing = false;
         state.signatureData = signatureCanvas.toDataURL();
-        await saveSignatureToDatabase();
-        saveToCache();
         showSignatureOnDocument();
     }
 }
@@ -663,7 +654,6 @@ if (undoSignatureBtn) {
                 } else {
                     showSignatureOnDocument();
                 }
-                saveToCache();
             };
             img.src = lastState;
         } else {
@@ -671,7 +661,6 @@ if (undoSignatureBtn) {
             state.signatureData = null;
             const overlay = document.getElementById('signature-overlay');
             if (overlay) overlay.style.display = 'none';
-            saveToCache();
         }
     });
 }
@@ -683,7 +672,6 @@ clearBtn.addEventListener('click', () => {
     state.signatureHistory = [];
     const signatureOverlay = document.getElementById('signature-overlay');
     if (signatureOverlay) signatureOverlay.style.display = 'none';
-    saveToCache();
 });
 
 // ==============================================
@@ -758,13 +746,8 @@ if (parapheCanvas) {
     parapheCanvas.addEventListener('touchend', (e) => {
         e.preventDefault();
         state.isDrawingParaphe = false;
-        const _sy = window.scrollY;
-        requestAnimationFrame(() => {
-            state.parapheData = parapheCanvas.toDataURL();
-            saveToCache();
-            showParapheOnDocument();
-            if (window.scrollY !== _sy) document.documentElement.scrollTop = _sy;
-        });
+        state.parapheData = parapheCanvas.toDataURL();
+        showParapheOnDocument();
     }, { passive: false });
 }
 
@@ -800,7 +783,6 @@ function stopDrawingParaphe() {
     if (state.isDrawingParaphe) {
         state.isDrawingParaphe = false;
         state.parapheData = parapheCanvas.toDataURL();
-        saveToCache();
         showParapheOnDocument();
     }
 }
@@ -825,7 +807,6 @@ if (undoParapheBtn) {
                 } else {
                     showParapheOnDocument();
                 }
-                saveToCache();
             };
             img.src = lastState;
         } else {
@@ -834,7 +815,6 @@ if (undoParapheBtn) {
             const overlay = document.getElementById('paraphe-overlay');
             if (overlay) overlay.style.display = 'none';
             removeParapheClones();
-            saveToCache();
         }
     });
 }
@@ -848,7 +828,6 @@ if (clearParapheBtn) {
         const parapheOverlay = document.getElementById('paraphe-overlay');
         if (parapheOverlay) parapheOverlay.style.display = 'none';
         removeParapheClones();
-        saveToCache();
     });
 }
 
@@ -1405,105 +1384,6 @@ function getSignatureTargetPages() {
     }
 }
 
-// ==============================================
-// SAUVEGARDE AUTOMATIQUE (Supabase)
-// ==============================================
-async function saveSignatureToDatabase() {
-    if (!state.signatureData) return;
-    try {
-        localStorage.setItem('lastSignature', state.signatureData);
-        if (typeof saveSignatureTemplate === 'function') {
-            await saveSignatureTemplate('Signature', state.signatureData);
-        }
-    } catch (error) {
-        console.warn('Erreur sauvegarde signature:', error);
-    }
-}
-
-// ==============================================
-// CACHE LOCALSTORAGE (signature + paraphe + prefs)
-// ==============================================
-function saveToCache() {
-    try {
-        if (state.signatureData) {
-            localStorage.setItem('cachedSignature', state.signatureData);
-        } else {
-            localStorage.removeItem('cachedSignature');
-        }
-        if (state.parapheData) {
-            localStorage.setItem('cachedParaphe', state.parapheData);
-        } else {
-            localStorage.removeItem('cachedParaphe');
-        }
-        // Sauvegarder les preferences
-        localStorage.setItem('signaturePrefs', JSON.stringify({
-            signatureColor: colorInput.value,
-            signatureWidth: widthInput.value,
-            parapheColor: parapheColorInput ? parapheColorInput.value : '#000000',
-            parapheWidth: parapheWidthInput ? parapheWidthInput.value : '2',
-            signatureSize: currentSignatureWidth,
-            parapheSize: currentParapheSize
-        }));
-    } catch (error) {
-        console.warn('Erreur sauvegarde cache:', error);
-    }
-}
-
-function loadFromCache() {
-    try {
-        // Charger la signature
-        const cachedSig = localStorage.getItem('cachedSignature') || localStorage.getItem('lastSignature');
-        if (cachedSig) {
-            state.signatureData = cachedSig;
-            const img = new Image();
-            img.onload = () => {
-                ctx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
-                ctx.drawImage(img, 0, 0, signatureCanvas.width, signatureCanvas.height);
-            };
-            img.src = cachedSig;
-
-            // Afficher le badge
-            const badge = document.getElementById('cached-signature-badge');
-            if (badge) badge.style.display = 'inline-block';
-        }
-
-        // Charger le paraphe
-        const cachedParaphe = localStorage.getItem('cachedParaphe');
-        if (cachedParaphe && ctxParaphe) {
-            state.parapheData = cachedParaphe;
-            const img = new Image();
-            img.onload = () => {
-                ctxParaphe.clearRect(0, 0, parapheCanvas.width, parapheCanvas.height);
-                ctxParaphe.drawImage(img, 0, 0, parapheCanvas.width, parapheCanvas.height);
-            };
-            img.src = cachedParaphe;
-        }
-
-        // Charger les preferences
-        const prefsStr = localStorage.getItem('signaturePrefs');
-        if (prefsStr) {
-            const prefs = JSON.parse(prefsStr);
-            if (prefs.signatureColor) colorInput.value = prefs.signatureColor;
-            if (prefs.signatureWidth) widthInput.value = prefs.signatureWidth;
-            if (prefs.parapheColor && parapheColorInput) parapheColorInput.value = prefs.parapheColor;
-            if (prefs.parapheWidth && parapheWidthInput) parapheWidthInput.value = prefs.parapheWidth;
-            if (prefs.signatureSize) {
-                currentSignatureWidth = prefs.signatureSize;
-                if (signatureSizeSlider) signatureSizeSlider.value = currentSignatureWidth;
-                if (sizeValueDisplay) sizeValueDisplay.textContent = `${currentSignatureWidth}px`;
-            }
-            if (prefs.parapheSize) {
-                currentParapheSize = prefs.parapheSize;
-                if (parapheSizeSlider) parapheSizeSlider.value = currentParapheSize;
-                if (parapheSizeValue) parapheSizeValue.textContent = `${currentParapheSize}px`;
-            }
-        }
-
-        console.log('Cache charge:', cachedSig ? 'signature' : '-', cachedParaphe ? 'paraphe' : '-');
-    } catch (error) {
-        console.warn('Erreur chargement cache:', error);
-    }
-}
 
 // ==============================================
 // GENERATION DU PDF SIGNE
@@ -2098,7 +1978,6 @@ if (themeToggle) {
 // ==============================================
 window.addEventListener('DOMContentLoaded', () => {
     loadTheme();
-    loadFromCache();
     updateCanvasCursor(signatureCanvas, state.signatureTool);
     if (parapheCanvas) updateCanvasCursor(parapheCanvas, state.parapheTool);
 });
