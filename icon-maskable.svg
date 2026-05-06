@@ -2,13 +2,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
     <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0A84FF"/>
-      <stop offset="100%" stop-color="#0066d6"/>
+      <stop offset="0%" stop-color="#1C6EF2"/>
+      <stop offset="100%" stop-color="#7B2FF7"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="rgba(255,255,255,0.16)"/>
+      <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
     </linearGradient>
   </defs>
+  <!-- Full bleed background (maskable: no rounded corners) -->
   <rect width="512" height="512" fill="url(#bg)"/>
-  <g fill="none" stroke="white" stroke-width="28" stroke-linecap="round" stroke-linejoin="round" transform="translate(256 256) scale(8.5) translate(-12 -12)">
-    <path d="M3 17.5V21h3.5L17 10.5 13.5 7 3 17.5z"/>
-    <path d="M14.5 6L18 9.5"/>
-  </g>
+  <rect width="512" height="260" fill="url(#shine)"/>
+  <!-- Signature wave (slightly inset for safe zone) -->
+  <path d="M96 288 C116 226,140 320,170 272 C200 224,214 302,244 268 C274 234,290 308,326 268 C362 228,382 286,432 260"
+    fill="none" stroke="white" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Underline -->
+  <line x1="96" y1="346" x2="432" y2="346" stroke="white" stroke-width="20" stroke-linecap="round" opacity="0.45"/>
 </svg>
