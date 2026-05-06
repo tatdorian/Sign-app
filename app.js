@@ -1147,6 +1147,7 @@ if (signatureSizeSlider && sizeValueDisplay) {
             signaturePreview.style.width = `${currentSignatureWidth}px`;
             constrainSignaturePosition();
         }
+        extraSignatures.forEach(c => { c.style.width = `${currentSignatureWidth}px`; });
     });
 }
 
@@ -1247,25 +1248,44 @@ signaturePreview.addEventListener('touchstart', (e) => {
     }
 }, { passive: false });
 
-// Double-clic (bureau) → téléporter la signature à l'endroit cliqué
+// Retire une instance de signature du document (sans effacer le dessin)
+function removePlacedSignature(sigEl) {
+    if (sigEl === signaturePreview) {
+        signatureOverlay.style.display = 'none';
+    } else if (sigEl.classList.contains('signature-clone')) {
+        const idx = extraSignatures.indexOf(sigEl);
+        if (idx !== -1) extraSignatures.splice(idx, 1);
+        sigEl.remove();
+    }
+}
+
+// Double-clic (bureau) → place ou retire la signature
 documentPreview.addEventListener('dblclick', (e) => {
+    const sigEl = e.target.closest('.signature-draggable');
+    if (sigEl) { removePlacedSignature(sigEl); return; }
     if (!state.signatureData) return;
-    if (e.target.closest('.signature-draggable, .paraphe-draggable, .annotation-canvas')) return;
+    if (e.target.closest('.paraphe-draggable, .annotation-canvas')) return;
     placeSignatureAt(e.clientX, e.clientY);
 });
 
-// Appui long (mobile) → téléporter la signature
+// Appui long (mobile) → place ou retire la signature
 let _lpTimer = null;
 let _lpStartX = 0, _lpStartY = 0;
 documentPreview.addEventListener('touchstart', (e) => {
-    if (!state.signatureData || e.touches.length !== 1) return;
-    if (e.target.closest('.signature-draggable, .paraphe-draggable')) return;
+    if (e.touches.length !== 1) return;
     const t = e.touches[0];
     _lpStartX = t.clientX; _lpStartY = t.clientY;
-    _lpTimer = setTimeout(() => {
-        _lpTimer = null;
-        placeSignatureAt(t.clientX, t.clientY);
-    }, 500);
+
+    const el = document.elementFromPoint(t.clientX, t.clientY);
+    const sigEl = el?.closest?.('.signature-draggable');
+    if (sigEl) {
+        _lpTimer = setTimeout(() => { _lpTimer = null; removePlacedSignature(sigEl); }, 600);
+        return;
+    }
+
+    if (e.target.closest('.paraphe-draggable')) return;
+    if (!state.signatureData) return;
+    _lpTimer = setTimeout(() => { _lpTimer = null; placeSignatureAt(t.clientX, t.clientY); }, 500);
 }, { passive: true });
 documentPreview.addEventListener('touchmove', (e) => {
     if (_lpTimer === null) return;
@@ -1808,53 +1828,110 @@ if (annotOpacityInput) {
     annotOpacityInput.addEventListener('input', () => {
         annotOpacity = parseInt(annotOpacityInput.value) / 100;
         if (annotOpacityVal) annotOpacityVal.textContent = annotOpacityInput.value + '%';
+        document.querySelectorAll('.annotation-canvas').forEach(c => _recomposeAnnot(c));
     });
 }
 
 if (annotClearBtn) {
     annotClearBtn.addEventListener('click', () => {
         document.querySelectorAll('.annotation-canvas').forEach(c => {
-            const ctx = c.getContext('2d');
-            ctx.clearRect(0, 0, c.width, c.height);
+            c.getContext('2d').clearRect(0, 0, c.width, c.height);
+            const raw = _annotRawMap.get(c);
+            if (raw) raw.getContext('2d').clearRect(0, 0, raw.width, raw.height);
         });
     });
 }
 
-function getAnnotCanvasForEvent(e) {
-    const touch = e.touches ? e.touches[0] : e;
-    const el = document.elementFromPoint(touch.clientX, touch.clientY);
-    if (!el) return null;
-    // chercher le canvas annotation le plus proche
-    const pageContainer = el.closest('.pdf-page-container') || documentPreview.querySelector('.pdf-page-container');
-    if (!pageContainer) return null;
-    return pageContainer.querySelector('.annotation-canvas');
+// ==============================================
+// SURLIGNEUR — opacité uniforme via canvas brut
+// ==============================================
+// Chaque canvas d'annotation possède un canvas "brut" (full-alpha).
+// Le canvas visible = canvas brut composité à l'opacité choisie.
+// Re-passer au même endroit ne change donc jamais l'opacité finale.
+const _annotRawMap = new WeakMap();
+let _annotRawBackup = null;   // sauvegarde du canvas brut en début de trait
+let _annotStrokePts = [];     // points du trait en cours (coordonnées canvas)
+
+function _getRawCanvas(annotCanvas) {
+    if (!_annotRawMap.has(annotCanvas)) {
+        const raw = document.createElement('canvas');
+        raw.width  = annotCanvas.width;
+        raw.height = annotCanvas.height;
+        _annotRawMap.set(annotCanvas, raw);
+    }
+    return _annotRawMap.get(annotCanvas);
 }
 
-function annotDraw(annotCtx, fromX, fromY, toX, toY) {
+function _recomposeAnnot(annotCanvas) {
+    const raw = _annotRawMap.get(annotCanvas);
+    if (!raw) return;
+    const actx = annotCanvas.getContext('2d');
+    actx.clearRect(0, 0, annotCanvas.width, annotCanvas.height);
+    actx.save();
+    actx.globalAlpha = annotOpacity;
+    actx.drawImage(raw, 0, 0);
+    actx.restore();
+}
+
+function _annotStrokeStart(annotCanvas, x, y) {
     if (annotationEraseMode) {
-        annotCtx.save();
-        annotCtx.globalCompositeOperation = 'destination-out';
-        annotCtx.lineWidth = annotSize * 2;
-        annotCtx.lineCap = 'round'; annotCtx.lineJoin = 'round';
-        annotCtx.globalAlpha = 1;
-        annotCtx.beginPath();
-        annotCtx.moveTo(fromX, fromY);
-        annotCtx.lineTo(toX, toY);
-        annotCtx.stroke();
-        annotCtx.restore();
-    } else {
-        annotCtx.save();
-        annotCtx.globalCompositeOperation = 'source-over';
-        annotCtx.globalAlpha = annotOpacity;
-        annotCtx.strokeStyle = annotColor;
-        annotCtx.lineWidth = annotSize;
-        annotCtx.lineCap = 'square'; annotCtx.lineJoin = 'miter';
-        annotCtx.beginPath();
-        annotCtx.moveTo(fromX, fromY);
-        annotCtx.lineTo(toX, toY);
-        annotCtx.stroke();
-        annotCtx.restore();
+        _annotStrokePts = [];
+        return;
     }
+    const raw = _getRawCanvas(annotCanvas);
+    // Backup du raw en début de trait pour pouvoir redessiner proprement
+    _annotRawBackup = document.createElement('canvas');
+    _annotRawBackup.width  = raw.width;
+    _annotRawBackup.height = raw.height;
+    _annotRawBackup.getContext('2d').drawImage(raw, 0, 0);
+    _annotStrokePts = [{ x, y }];
+}
+
+function _annotStrokeContinue(annotCanvas, x, y) {
+    if (annotationEraseMode) {
+        // Gomme: effacer du raw directement puis recomposer
+        const raw = _getRawCanvas(annotCanvas);
+        const rctx = raw.getContext('2d');
+        rctx.save();
+        rctx.globalCompositeOperation = 'destination-out';
+        rctx.lineWidth = annotSize * 2;
+        rctx.lineCap = 'round'; rctx.lineJoin = 'round';
+        rctx.globalAlpha = 1;
+        rctx.beginPath();
+        rctx.moveTo(annotLastX, annotLastY);
+        rctx.lineTo(x, y);
+        rctx.stroke();
+        rctx.restore();
+        _recomposeAnnot(annotCanvas);
+        return;
+    }
+    _annotStrokePts.push({ x, y });
+    if (_annotStrokePts.length < 2) return;
+
+    const raw = _getRawCanvas(annotCanvas);
+    const rctx = raw.getContext('2d');
+    // Restaurer le raw à son état pré-trait
+    rctx.clearRect(0, 0, raw.width, raw.height);
+    if (_annotRawBackup) rctx.drawImage(_annotRawBackup, 0, 0);
+    // Redessiner tout le trait courant d'un seul trait (pas de jointures visibles)
+    rctx.save();
+    rctx.strokeStyle = annotColor;
+    rctx.lineWidth = annotSize;
+    rctx.lineCap = 'round';
+    rctx.lineJoin = 'round';
+    rctx.globalCompositeOperation = 'source-over';
+    rctx.globalAlpha = 1;
+    rctx.beginPath();
+    rctx.moveTo(_annotStrokePts[0].x, _annotStrokePts[0].y);
+    for (let i = 1; i < _annotStrokePts.length; i++) rctx.lineTo(_annotStrokePts[i].x, _annotStrokePts[i].y);
+    rctx.stroke();
+    rctx.restore();
+    _recomposeAnnot(annotCanvas);
+}
+
+function _annotStrokeEnd() {
+    _annotRawBackup = null;
+    _annotStrokePts = [];
 }
 
 let currentAnnotCanvas = null;
@@ -1866,31 +1943,33 @@ documentPreview.addEventListener('mousedown', (e) => {
     if (!currentAnnotCanvas) return;
     isAnnotating = true;
     const rect = currentAnnotCanvas.getBoundingClientRect();
-    const scaleX = currentAnnotCanvas.width / rect.width;
-    const scaleY = currentAnnotCanvas.height / rect.height;
-    annotLastX = (e.clientX - rect.left) * scaleX;
-    annotLastY = (e.clientY - rect.top) * scaleY;
+    annotLastX = (e.clientX - rect.left) * (currentAnnotCanvas.width / rect.width);
+    annotLastY = (e.clientY - rect.top)  * (currentAnnotCanvas.height / rect.height);
+    _annotStrokeStart(currentAnnotCanvas, annotLastX, annotLastY);
     e.preventDefault();
 });
 
 documentPreview.addEventListener('mousemove', (e) => {
     if (!annotationMode || !isAnnotating || !currentAnnotCanvas) return;
     const rect = currentAnnotCanvas.getBoundingClientRect();
-    const scaleX = currentAnnotCanvas.width / rect.width;
-    const scaleY = currentAnnotCanvas.height / rect.height;
-    const x = (e.clientX - rect.left) * scaleX;
-    const y = (e.clientY - rect.top) * scaleY;
-    annotDraw(currentAnnotCanvas.getContext('2d'), annotLastX, annotLastY, x, y);
+    const x = (e.clientX - rect.left) * (currentAnnotCanvas.width / rect.width);
+    const y = (e.clientY - rect.top)  * (currentAnnotCanvas.height / rect.height);
+    _annotStrokeContinue(currentAnnotCanvas, x, y);
     annotLastX = x; annotLastY = y;
     e.preventDefault();
 });
 
-document.addEventListener('mouseup', () => { isAnnotating = false; currentAnnotCanvas = null; });
+document.addEventListener('mouseup', () => {
+    if (isAnnotating) _annotStrokeEnd();
+    isAnnotating = false;
+    currentAnnotCanvas = null;
+});
 
 // Touch handlers for annotation — added/removed dynamically so they NEVER
 // block native scroll when annotation mode is off (passive listeners allow scroll).
 function _annotTouchStart(e) {
     if (e.touches.length === 2) {
+        if (isAnnotating) _annotStrokeEnd();
         isAnnotating = false;
         currentAnnotCanvas = null;
         twoFingerLastY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
@@ -1908,6 +1987,7 @@ function _annotTouchStart(e) {
     const rect = currentAnnotCanvas.getBoundingClientRect();
     annotLastX = (touch.clientX - rect.left) * (currentAnnotCanvas.width / rect.width);
     annotLastY = (touch.clientY - rect.top)  * (currentAnnotCanvas.height / rect.height);
+    _annotStrokeStart(currentAnnotCanvas, annotLastX, annotLastY);
     e.preventDefault();
 }
 
@@ -1915,7 +1995,6 @@ function _annotTouchMove(e) {
     if (e.touches.length === 2) {
         const centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
         if (twoFingerLastY !== null) {
-            // Instant scroll to avoid conflict with css scroll-behavior:smooth
             const delta = twoFingerLastY - centerY;
             document.documentElement.scrollTop += delta;
             document.body.scrollTop += delta;
@@ -1929,12 +2008,13 @@ function _annotTouchMove(e) {
     const rect = currentAnnotCanvas.getBoundingClientRect();
     const x = (touch.clientX - rect.left) * (currentAnnotCanvas.width / rect.width);
     const y = (touch.clientY - rect.top)  * (currentAnnotCanvas.height / rect.height);
-    annotDraw(currentAnnotCanvas.getContext('2d'), annotLastX, annotLastY, x, y);
+    _annotStrokeContinue(currentAnnotCanvas, x, y);
     annotLastX = x; annotLastY = y;
     e.preventDefault();
 }
 
 function _annotTouchEnd() {
+    if (isAnnotating) _annotStrokeEnd();
     isAnnotating = false;
     currentAnnotCanvas = null;
     twoFingerLastY = null;
