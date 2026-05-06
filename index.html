@@ -4,11 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Signature">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="theme-color" content="#007AFF">
     <link rel="manifest" href="manifest.json">
     <link rel="icon" type="image/svg+xml" href="icon.svg">
     <link rel="apple-touch-icon" href="icon-192.png">
+    <link rel="apple-touch-icon" sizes="192x192" href="icon-192.png">
+    <link rel="apple-touch-icon" sizes="512x512" href="icon-512.png">
     <title>Signature</title>
     <link rel="stylesheet" href="styles.css">
 </head>
@@ -35,6 +39,65 @@
     <div id="offline-indicator" class="offline-indicator" style="display:none">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.58 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
         <span>Hors ligne</span>
+    </div>
+
+    <!-- Bannière install iOS Safari (affichée automatiquement) -->
+    <div id="ios-safari-banner" class="ios-safari-banner" style="display:none">
+        <div class="ios-safari-banner-content">
+            <div class="ios-safari-banner-icon">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17.5V21h3.5L17 10.5 13.5 7 3 17.5z"/><path d="M14.5 6L18 9.5"/></svg>
+            </div>
+            <div class="ios-safari-banner-text">
+                <strong>Installer Signature</strong>
+                <span>Appuyez sur
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                    puis <em>« Sur l'écran d'accueil »</em></span>
+            </div>
+            <button class="ios-safari-banner-close" id="ios-safari-banner-close" aria-label="Fermer">✕</button>
+        </div>
+        <div class="ios-safari-banner-arrow">▼</div>
+    </div>
+
+    <!-- Modal guide installation iOS -->
+    <div id="ios-install-modal" class="ios-install-modal" style="display:none" role="dialog" aria-modal="true" aria-label="Installer l'application">
+        <div class="ios-install-card">
+            <button class="ios-install-close" id="ios-install-close" aria-label="Fermer">✕</button>
+            <div id="ios-modal-body-safari">
+                <div class="ios-install-icon">
+                    <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17.5V21h3.5L17 10.5 13.5 7 3 17.5z"/><path d="M14.5 6L18 9.5"/></svg>
+                </div>
+                <h2 class="ios-install-title">Installer Signature</h2>
+                <p class="ios-install-sub">Ajoutez l'app à votre écran d'accueil pour l'utiliser comme une vraie application, même sans internet.</p>
+                <ol class="ios-install-steps">
+                    <li>
+                        <span class="ios-step-num">1</span>
+                        <span>Appuyez sur le bouton <strong>Partager</strong>
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin:0 3px;color:#007AFF"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                            en bas de l'écran Safari</span>
+                    </li>
+                    <li>
+                        <span class="ios-step-num">2</span>
+                        <span>Faites défiler le menu vers le bas et appuyez sur <strong>« Sur l'écran d'accueil »</strong></span>
+                    </li>
+                    <li>
+                        <span class="ios-step-num">3</span>
+                        <span>Appuyez sur <strong>Ajouter</strong> en haut à droite</span>
+                    </li>
+                </ol>
+                <div class="ios-install-arrow">▼</div>
+            </div>
+            <div id="ios-modal-body-chrome" style="display:none">
+                <div class="ios-install-icon" style="background:linear-gradient(135deg,#ea4335,#fbbc05,#34a853,#4285f4)">
+                    <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                </div>
+                <h2 class="ios-install-title">Utiliser Safari</h2>
+                <p class="ios-install-sub">Chrome sur iPhone ne permet pas d'installer des applications. Ouvrez cette page dans <strong>Safari</strong> pour pouvoir l'installer sur votre écran d'accueil.</p>
+                <button class="ios-copy-link-btn" id="ios-copy-link-btn">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    Copier le lien
+                </button>
+            </div>
+        </div>
     </div>
 
     <div class="container">
@@ -77,7 +140,7 @@
                         </div>
                         <p class="drop-text drop-text-desktop">Glissez-deposez votre document</p>
                         <p class="drop-text drop-text-mobile">Choisir un document</p>
-                        <button class="btn btn-primary" onclick="document.getElementById('file-input').click()">
+                        <button class="btn btn-primary" id="browse-btn">
                             Parcourir
                         </button>
                         <p class="file-info" id="file-info">PDF, JPG, PNG</p>
@@ -102,30 +165,37 @@
 
                 <!-- Barre d'annotation sur le document -->
                 <div id="annotation-toolbar" class="annotation-toolbar" style="display: none;">
-                    <div class="annotation-tools">
-                        <button class="annot-btn active" id="annot-highlight-btn">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l-6 6v3h3l6-6"/><path d="M22 12l-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>
-                            Surligneur
-                        </button>
-                        <button class="annot-btn" id="annot-erase-btn">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20H7L3 16a2 2 0 0 1 0-2.8L13.4 2.8a2 2 0 0 1 2.8 0l5 5a2 2 0 0 1 0 2.8L11 20"/></svg>
-                            Gomme
-                        </button>
-                    </div>
-                    <div class="annotation-controls">
-                        <div style="display:flex;gap:5px;align-items:center">
+                    <div class="annot-row annot-row-top">
+                        <div class="annotation-tools">
+                            <button class="annot-btn active" id="annot-highlight-btn">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l-6 6v3h3l6-6"/><path d="M22 12l-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>
+                                Surligneur
+                            </button>
+                            <button class="annot-btn" id="annot-erase-btn">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20H7L3 16a2 2 0 0 1 0-2.8L13.4 2.8a2 2 0 0 1 2.8 0l5 5a2 2 0 0 1 0 2.8L11 20"/></svg>
+                                Gomme
+                            </button>
+                        </div>
+                        <div class="annot-colors">
                             <button class="annot-color-swatch active" data-annot-color="#FFD60A" style="background:#FFD60A" title="Jaune"></button>
                             <button class="annot-color-swatch" data-annot-color="#34C759" style="background:#34C759" title="Vert"></button>
                             <button class="annot-color-swatch" data-annot-color="#FF9500" style="background:#FF9500" title="Orange"></button>
                             <button class="annot-color-swatch" data-annot-color="#0A84FF" style="background:#0A84FF" title="Bleu"></button>
                             <button class="annot-color-swatch" data-annot-color="#FF453A" style="background:#FF453A" title="Rouge"></button>
                         </div>
+                        <button class="annot-clear-btn" id="annot-clear-btn">Effacer tout</button>
+                    </div>
+                    <div class="annot-row annot-row-sliders">
                         <div class="annot-size-wrap">
                             <span>Taille</span>
                             <input type="range" id="annot-size" min="8" max="48" value="22" step="2">
                         </div>
-                        <button class="annot-clear-btn" id="annot-clear-btn">Effacer tout</button>
+                        <div class="annot-size-wrap">
+                            <span>Opacité — <strong id="annot-opacity-val">42%</strong></span>
+                            <input type="range" id="annot-opacity" min="10" max="100" value="42" step="2">
+                        </div>
                     </div>
+                    <p class="annot-scroll-hint">2 doigts pour faire défiler</p>
                 </div>
 
                 <div id="document-preview" class="document-preview">
@@ -147,24 +217,12 @@
                     <input type="range" id="signature-size-slider" min="50" max="400" value="150" step="5">
                 </div>
 
-                <div id="page-selector-panel" class="page-selector-panel" style="display: none;">
-                    <h3>Pages a signer</h3>
-                    <div class="page-selector-options">
-                        <label class="radio-option">
-                            <input type="radio" name="sig-page-mode" value="current" checked>
-                            <span>Page actuelle (<span id="current-page-display">1</span>)</span>
-                        </label>
-                        <label class="radio-option">
-                            <input type="radio" name="sig-page-mode" value="all">
-                            <span>Toutes les pages</span>
-                        </label>
-                        <label class="radio-option">
-                            <input type="radio" name="sig-page-mode" value="custom">
-                            <span>Pages specifiques</span>
-                        </label>
-                    </div>
-                    <div id="custom-pages-container" class="custom-pages-container" style="display: none;">
-                    </div>
+                <div id="sig-placement-control" class="sig-placement-control" style="display: none;">
+                    <label class="sig-multi-label">
+                        <input type="checkbox" id="sig-multi-place">
+                        <span>Placer à plusieurs endroits</span>
+                    </label>
+                    <span class="sig-placement-hint">Double-clic / appui long pour placer</span>
                 </div>
             </section>
 
@@ -236,8 +294,6 @@
                         <h2>Paraphe <em>(optionnel)</em></h2>
                     </div>
                 </div>
-                <p class="hint">Copie automatique sur toutes les pages</p>
-
                 <div class="tools-bar" data-tools="paraphe">
                     <button class="tool-btn active" data-tool="pen" data-target="paraphe">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>
@@ -346,37 +402,99 @@
 
     // Bouton "Installer l'app"
     let deferredInstallPrompt = null;
-    const installBtn = document.getElementById('install-btn');
+    const installBtn      = document.getElementById('install-btn');
+    const iosModal        = document.getElementById('ios-install-modal');
+    const iosClose        = document.getElementById('ios-install-close');
+    const iosSafariBanner = document.getElementById('ios-safari-banner');
+    const iosBannerClose  = document.getElementById('ios-safari-banner-close');
+    const iosBodySafari   = document.getElementById('ios-modal-body-safari');
+    const iosBodyChrome   = document.getElementById('ios-modal-body-chrome');
+    const iosCopyBtn      = document.getElementById('ios-copy-link-btn');
 
+    const ua = navigator.userAgent;
+    const isIOS        = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
+    const isIOSSafari  = isIOS && /Safari/.test(ua) && !/CriOS|FxiOS|OPiOS|EdgiOS/.test(ua);
+    const isIOSOther   = isIOS && !isIOSSafari; // Chrome, Firefox, etc. sur iOS
+    const isStandalone = window.navigator.standalone === true
+                      || window.matchMedia('(display-mode: standalone)').matches;
+
+    if (isIOS && !isStandalone) {
+        // Toujours montrer le bouton installer sur iOS
+        if (installBtn) installBtn.style.display = 'inline-flex';
+
+        // Sur Safari: bannière automatique en bas après 1.5 s
+        if (isIOSSafari && iosSafariBanner) {
+            const bannerDismissed = sessionStorage.getItem('ios-banner-dismissed');
+            if (!bannerDismissed) {
+                setTimeout(() => { iosSafariBanner.style.display = 'block'; }, 1500);
+            }
+        }
+    }
+
+    // Android/Chrome desktop: prompt natif
     window.addEventListener('beforeinstallprompt', (e) => {
         e.preventDefault();
         deferredInstallPrompt = e;
         if (installBtn) installBtn.style.display = 'inline-flex';
     });
 
+    function openIosModal() {
+        if (!iosModal) return;
+        // Afficher le bon panneau selon le navigateur
+        if (iosBodySafari) iosBodySafari.style.display = isIOSSafari ? 'block' : 'none';
+        if (iosBodyChrome) iosBodyChrome.style.display = isIOSOther  ? 'block' : 'none';
+        iosModal.style.display = 'flex';
+    }
+
     if (installBtn) {
         installBtn.addEventListener('click', async () => {
-            if (!deferredInstallPrompt) {
-                // iOS: pas de prompt, afficher instructions
-                const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-                if (isIOS) {
-                    alert("Pour installer sur iPhone/iPad : appuyez sur le bouton Partager puis 'Sur l'ecran d'accueil'.");
-                } else {
-                    alert("L'application est deja installee, ou votre navigateur ne supporte pas l'installation. Sur Chrome/Edge, cherchez l'icone d'installation dans la barre d'adresse.");
-                }
-                return;
-            }
+            if (isIOS) { openIosModal(); return; }
+            if (!deferredInstallPrompt) return;
             deferredInstallPrompt.prompt();
             const { outcome } = await deferredInstallPrompt.userChoice;
-            console.log('[PWA] Choix installation:', outcome);
             deferredInstallPrompt = null;
-            installBtn.style.display = 'none';
+            if (installBtn) installBtn.style.display = 'none';
+        });
+    }
+
+    // Fermer la bannière Safari
+    if (iosBannerClose && iosSafariBanner) {
+        iosBannerClose.addEventListener('click', () => {
+            iosSafariBanner.style.display = 'none';
+            sessionStorage.setItem('ios-banner-dismissed', '1');
+        });
+        // Tap sur la bannière → ouvrir le guide complet
+        iosSafariBanner.addEventListener('click', (e) => {
+            if (e.target !== iosBannerClose && !iosBannerClose.contains(e.target)) {
+                openIosModal();
+            }
+        });
+    }
+
+    if (iosClose && iosModal) {
+        iosClose.addEventListener('click', () => { iosModal.style.display = 'none'; });
+        iosModal.addEventListener('click', (e) => {
+            if (e.target === iosModal) iosModal.style.display = 'none';
+        });
+    }
+
+    // Copier le lien (pour les utilisateurs sur Chrome iOS)
+    if (iosCopyBtn) {
+        iosCopyBtn.addEventListener('click', () => {
+            navigator.clipboard.writeText(location.href).then(() => {
+                iosCopyBtn.textContent = 'Lien copié !';
+                setTimeout(() => {
+                    iosCopyBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copier le lien';
+                }, 2000);
+            }).catch(() => {
+                prompt('Copiez ce lien et ouvrez-le dans Safari :', location.href);
+            });
         });
     }
 
     window.addEventListener('appinstalled', () => {
-        console.log('[PWA] App installee');
         if (installBtn) installBtn.style.display = 'none';
+        if (iosSafariBanner) iosSafariBanner.style.display = 'none';
     });
 
     // Indicateur hors ligne
