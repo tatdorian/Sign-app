@@ -78,23 +78,6 @@ function isPhone() {
 }
 
 // ==============================================
-// LOCK / UNLOCK SCROLL CORPS (fix iOS scroll-to-top)
-// ==============================================
-let _savedScrollY = 0;
-
-function lockBodyScroll() {
-    _savedScrollY = window.scrollY;
-    document.body.style.top = `-${_savedScrollY}px`;
-    document.body.classList.add('drawing-active');
-}
-
-function unlockBodyScroll() {
-    document.body.classList.remove('drawing-active');
-    document.body.style.top = '';
-    window.scrollTo(0, _savedScrollY);
-}
-
-// ==============================================
 // OUTILS DE DESSIN: stylo, surligneur, gomme
 // ==============================================
 function applyToolStyle(context, tool, color, width) {
@@ -563,7 +546,6 @@ signatureCanvas.addEventListener('mouseout', stopDrawing);
 
 signatureCanvas.addEventListener('touchstart', (e) => {
     e.preventDefault();
-    lockBodyScroll();
     state.signatureHistory.push(signatureCanvas.toDataURL());
     const touch = e.touches[0];
     const rect = signatureCanvas.getBoundingClientRect();
@@ -597,7 +579,6 @@ signatureCanvas.addEventListener('touchmove', (e) => {
 
 signatureCanvas.addEventListener('touchend', (e) => {
     e.preventDefault();
-    unlockBodyScroll();
     state.isDrawing = false;
     state.signatureData = signatureCanvas.toDataURL();
     saveToCache();
@@ -720,7 +701,6 @@ if (parapheCanvas) {
 
     parapheCanvas.addEventListener('touchstart', (e) => {
         e.preventDefault();
-        lockBodyScroll();
         state.parapheHistory.push(parapheCanvas.toDataURL());
         const touch = e.touches[0];
         const rect = parapheCanvas.getBoundingClientRect();
@@ -754,7 +734,6 @@ if (parapheCanvas) {
 
     parapheCanvas.addEventListener('touchend', (e) => {
         e.preventDefault();
-        unlockBodyScroll();
         state.isDrawingParaphe = false;
         state.parapheData = parapheCanvas.toDataURL();
         saveToCache();

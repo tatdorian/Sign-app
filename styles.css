@@ -876,11 +876,6 @@ footer {
 /* =============================================
    PREVENT SCROLL DURING DRAWING (iOS fix)
    ============================================= */
-body.drawing-active {
-    overflow: hidden; position: fixed;
-    width: 100%; left: 0; right: 0;
-}
-
 /* =============================================
    RESPONSIVE — TABLETTES
    ============================================= */
