@@ -266,6 +266,7 @@ async function handleFileUpload(e) {
         }
 
         removeParapheClones();
+        removeSignatureClones();
 
         // Vider le contenu precedent (garder les overlays)
         const children = Array.from(documentPreview.children);
@@ -290,6 +291,9 @@ async function handleFileUpload(e) {
 
         const sizeControl = document.getElementById('signature-size-control');
         if (sizeControl) sizeControl.style.display = 'block';
+
+        const placementControl = document.getElementById('sig-placement-control');
+        if (placementControl) placementControl.style.display = 'flex';
 
         // Afficher toolbar
         const toolbar = document.getElementById('doc-toolbar');
@@ -343,6 +347,7 @@ if (newDocBtn) {
         }
 
         removeParapheClones();
+        removeSignatureClones();
 
         // Vider le preview
         const children = Array.from(documentPreview.children);
@@ -355,8 +360,10 @@ if (newDocBtn) {
         // Masquer les controls
         const sizeControl = document.getElementById('signature-size-control');
         const toolbar = document.getElementById('doc-toolbar');
+        const placementControl = document.getElementById('sig-placement-control');
         if (sizeControl) sizeControl.style.display = 'none';
         if (toolbar) toolbar.style.display = 'none';
+        if (placementControl) placementControl.style.display = 'none';
 
         // Remettre la zone d'upload visible
         dropZone.style.display = '';
@@ -665,6 +672,7 @@ clearBtn.addEventListener('click', () => {
     state.signatureHistory = [];
     const signatureOverlay = document.getElementById('signature-overlay');
     if (signatureOverlay) signatureOverlay.style.display = 'none';
+    removeSignatureClones();
 });
 
 // ==============================================
@@ -680,12 +688,14 @@ function showSignatureOnDocument() {
             const _sy = window.scrollY;
             signatureOverlay.style.display = 'block';
             updateSignaturePreviewPosition();
+            extraSignatures.forEach(c => { c.src = state.signatureData; });
             if (window.scrollY !== _sy) document.documentElement.scrollTop = _sy;
         };
         if (signaturePreview.complete) {
             const _sy = window.scrollY;
             signatureOverlay.style.display = 'block';
             updateSignaturePreviewPosition();
+            extraSignatures.forEach(c => { c.src = state.signatureData; });
             if (window.scrollY !== _sy) document.documentElement.scrollTop = _sy;
         }
     }
@@ -1140,16 +1150,74 @@ if (signatureSizeSlider && sizeValueDisplay) {
     });
 }
 
+// Extra instances placed via multi-mode
+let extraSignatures = [];
+
+function removeSignatureClones() {
+    if (signatureOverlay) signatureOverlay.querySelectorAll('.signature-clone').forEach(c => c.remove());
+    extraSignatures = [];
+}
+
+function addSignatureClone(x, y) {
+    if (!state.signatureData || !signatureOverlay) return;
+    const clone = document.createElement('img');
+    clone.src = state.signatureData;
+    clone.className = 'signature-draggable signature-clone';
+    clone.style.cssText = `width:${currentSignatureWidth}px;height:auto;position:absolute;left:${x}px;top:${y}px;z-index:10;pointer-events:auto;cursor:move;`;
+    signatureOverlay.appendChild(clone);
+    extraSignatures.push(clone);
+
+    let _cdragging = false, _cdx = 0, _cdy = 0;
+    function _cStart(e) {
+        _cdragging = true;
+        const r = clone.getBoundingClientRect();
+        _cdx = e.clientX - r.left; _cdy = e.clientY - r.top;
+        clone.style.cursor = 'grabbing';
+    }
+    function _cDrag(e) {
+        if (!_cdragging) return;
+        const cr = documentPreview.getBoundingClientRect();
+        clone.style.left = `${e.clientX - cr.left - _cdx}px`;
+        clone.style.top  = `${e.clientY - cr.top  - _cdy}px`;
+    }
+    function _cStop() { if (_cdragging) { _cdragging = false; clone.style.cursor = 'move'; } }
+    clone.addEventListener('mousedown', _cStart);
+    document.addEventListener('mousemove', _cDrag);
+    document.addEventListener('mouseup', _cStop);
+
+    function _cTouchMove(e) {
+        if (e.touches.length === 1) { e.preventDefault(); _cDrag({ clientX: e.touches[0].clientX, clientY: e.touches[0].clientY }); }
+    }
+    function _cTouchEnd() {
+        _cStop();
+        document.removeEventListener('touchmove', _cTouchMove);
+        document.removeEventListener('touchend', _cTouchEnd);
+    }
+    clone.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 1) {
+            e.preventDefault();
+            _cStart({ clientX: e.touches[0].clientX, clientY: e.touches[0].clientY });
+            document.addEventListener('touchmove', _cTouchMove, { passive: false });
+            document.addEventListener('touchend', _cTouchEnd);
+        }
+    }, { passive: false });
+}
+
 // Place la signature centrée sur un point (coordonnées clientX/Y)
 function placeSignatureAt(clientX, clientY) {
     if (!signaturePreview || !signatureOverlay || !state.signatureData) return;
     const containerRect = documentPreview.getBoundingClientRect();
     const x = clientX - containerRect.left - signaturePreview.offsetWidth / 2;
     const y = clientY - containerRect.top  - signaturePreview.offsetHeight / 2;
-    signaturePreview.style.left = `${Math.max(0, x)}px`;
-    signaturePreview.style.top  = `${Math.max(0, y)}px`;
-    constrainSignaturePosition();
-    detectSignaturePage();
+    const sigMultiChk = document.getElementById('sig-multi-place');
+    if (sigMultiChk && sigMultiChk.checked) {
+        addSignatureClone(Math.max(0, x), Math.max(0, y));
+    } else {
+        signaturePreview.style.left = `${Math.max(0, x)}px`;
+        signaturePreview.style.top  = `${Math.max(0, y)}px`;
+        constrainSignaturePosition();
+        detectSignaturePage();
+    }
 }
 
 signaturePreview.addEventListener('mousedown', startDrag);
@@ -1461,6 +1529,47 @@ async function createSignedPDF() {
             height: sigH
         });
     });
+
+    // Signature clones (multi-placement)
+    for (const clone of extraSignatures) {
+        const cloneLeft = parseFloat(clone.style.left) || 50;
+        const cloneTop  = parseFloat(clone.style.top)  || 50;
+        const cloneRect = clone.getBoundingClientRect();
+        const cloneCenterY = cloneRect.top + cloneRect.height / 2;
+
+        let clonePageNum = state.signaturePage;
+        if (pagesContainer) {
+            for (const pageEl of pagesContainer.querySelectorAll('.pdf-page-container')) {
+                const pr = pageEl.getBoundingClientRect();
+                if (cloneCenterY >= pr.top && cloneCenterY <= pr.bottom) {
+                    clonePageNum = parseInt(pageEl.dataset.pageNumber); break;
+                }
+            }
+        }
+        const clonePageCont = pagesContainer ? pagesContainer.querySelector(`.pdf-page-container[data-page-number="${clonePageNum}"]`) : null;
+        const cloneRefCanvas = clonePageCont ? clonePageCont.querySelector('.pdf-page-canvas') : documentPreview.querySelector('canvas, img');
+
+        let cFracX = fracX, cFracY = fracY, cFracW = fracW;
+        if (cloneRefCanvas) {
+            const cr = cloneRefCanvas.getBoundingClientRect();
+            const ctr = documentPreview.getBoundingClientRect();
+            cFracX = (cloneLeft - (cr.left - ctr.left)) / cr.width;
+            cFracY = (cloneTop  - (cr.top  - ctr.top )) / cr.height;
+            cFracW = cloneRect.width / cr.width;
+        }
+
+        if (clonePageNum >= 1 && clonePageNum <= pages.length) {
+            const page = pages[clonePageNum - 1];
+            const { width: pw, height: ph } = page.getSize();
+            const cW = cFracW * pw;
+            const cH = cW * (signatureImage.height / signatureImage.width);
+            page.drawImage(signatureImage, {
+                x: cFracX * pw,
+                y: ph - (cFracY * ph) - cH,
+                width: cW, height: cH
+            });
+        }
+    }
 
     // Ajouter le paraphe sur toutes les pages
     if (state.parapheData) {
