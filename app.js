@@ -1,4 +1,9 @@
 // Application de Signature de Documents
+
+// Configuration pdf.js : le worker doit correspondre exactement à la version du CDN
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
 // ==============================================
 // ETAT GLOBAL
 // ==============================================
