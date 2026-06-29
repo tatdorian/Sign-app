@@ -2,7 +2,7 @@
 // SERVICE WORKER - Signature App PWA
 // Strategie cache-first avec mise a jour reseau
 // =============================================
-const VERSION = 'sig-app-v2';
+const VERSION = 'sig-app-v3';
 const CACHE_STATIC = `${VERSION}-static`;
 const CACHE_RUNTIME = `${VERSION}-runtime`;
 
@@ -10,12 +10,8 @@ const CACHE_RUNTIME = `${VERSION}-runtime`;
 const STATIC_ASSETS = [
     './',
     './index.html',
-    './login.html',
     './styles.css',
     './app.js',
-    './auth.js',
-    './supabase-client.js',
-    './session-check.js',
     './manifest.json',
     './icon.svg',
     './icon-maskable.svg',
@@ -24,8 +20,7 @@ const STATIC_ASSETS = [
     // Bibliotheques CDN cruciales pour fonctionnement offline
     'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js',
     'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
-    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
-    'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2'
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
 ];
 
 // =============================================
@@ -65,7 +60,7 @@ self.addEventListener('activate', event => {
 
 // =============================================
 // FETCH : cache-first avec fallback reseau
-// Pour API (POST, supabase): network-first
+// Pour API (POST email): network-first
 // =============================================
 self.addEventListener('fetch', event => {
     const { request } = event;
@@ -77,9 +72,8 @@ self.addEventListener('fetch', event => {
     // Ignorer les schemes non-http (chrome-extension, etc.)
     if (!url.protocol.startsWith('http')) return;
 
-    // API Supabase et envoi email : network-first (donnees dynamiques)
-    const isAPI = url.hostname.includes('supabase') ||
-                  url.pathname.includes('/api/') ||
+    // Envoi email : network-first (donnees dynamiques)
+    const isAPI = url.pathname.includes('/api/') ||
                   url.pathname.includes('send-email');
 
     if (isAPI) {

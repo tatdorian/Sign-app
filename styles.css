@@ -370,20 +370,6 @@ header { margin-bottom: 24px; }
 }
 
 /* =============================================
-   USER BAR
-   ============================================= */
-.user-bar {
-    display: flex; justify-content: space-between;
-    align-items: center; flex-wrap: wrap; gap: 8px;
-    padding: 10px 14px;
-    background: var(--bg-card);
-    border-radius: var(--r);
-    box-shadow: var(--shadow-sm);
-    margin-bottom: 14px;
-}
-.user-info { font-size: .88em; color: var(--label-2); font-weight: 500; }
-
-/* =============================================
    CARDS
    ============================================= */
 main { display: flex; flex-direction: column; gap: 14px; }
@@ -989,18 +975,6 @@ input[type="range"]::-moz-range-thumb {
 footer {
     margin-top: 28px; text-align: center;
     color: var(--label-3); font-size: .75em; padding: 14px 0;
-}
-
-/* =============================================
-   AUTH (login.html compatible)
-   ============================================= */
-.auth-card { max-width: 400px; margin: 60px auto; }
-.auth-card input {
-    width: 100%; padding: 10px 13px;
-    border: 1px solid var(--separator-strong);
-    border-radius: var(--r-sm);
-    background: var(--bg-card); color: var(--label);
-    font-size: .95em; margin-bottom: 10px;
 }
 
 /* =============================================

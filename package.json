@@ -15,8 +15,7 @@
     "document",
     "email",
     "signing",
-    "vercel",
-    "supabase"
+    "vercel"
   ],
   "author": "",
   "license": "MIT",
@@ -24,7 +23,6 @@
     "node": ">=18.x"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.39.0",
     "cors": "^2.8.5",
     "express": "^4.18.2",
     "nodemailer": "^6.9.7"
