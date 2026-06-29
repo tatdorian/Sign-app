@@ -38,7 +38,7 @@ const createTransporter = () => {
     //     }
     // };
 
-    return nodemailer.createTransporter(emailConfig);
+    return nodemailer.createTransport(emailConfig);
 };
 
 // Route pour servir l'application
@@ -47,7 +47,8 @@ app.get('/', (req, res) => {
 });
 
 // Route pour envoyer un email
-app.post('/send-email', async (req, res) => {
+// Montée sur /send-email (appel local) et /api/send-email (appel via domaine/IP)
+app.post(['/send-email', '/api/send-email'], async (req, res) => {
     try {
         const { to, subject, message, pdfData } = req.body;
 
