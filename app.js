@@ -2497,6 +2497,9 @@ function createExistingTextEdit(line, pageNum, canvas, lineKey, caretPoint) {
     el.dataset.initLeft = left;
     el.dataset.initTop = top;
     el.dataset.initFontPx = fontPx;
+    el.dataset.dispScale = scale;
+    el.dataset.lineCx = line.cx;
+    el.dataset.lineCw = line.cw;
     el.style.left = left + 'px';
     el.style.top = top + 'px';
     // Mise en page intangible : pas de retour à la ligne (le texte s'étend
@@ -2640,6 +2643,14 @@ function attachResize(handle, el) {
 // (sinon : tout sélectionner — utile pour le placeholder d'un texte ajouté)
 function startEditingText(el, caretPoint) {
     if (!el || el.dataset.type !== 'text') return;
+    // Reprise d'édition d'une ligne déjà validée : restaurer la vue d'édition
+    if (el.classList.contains('ed-committed')) {
+        el.querySelectorAll('.ed-diff-suffix').forEach(s => s.remove());
+        const cc = el.querySelector('.editor-text-content');
+        if (cc) cc.style.visibility = '';
+        el.style.background = '#ffffff';
+        el.classList.remove('ed-committed');
+    }
     el.classList.add('editing');
     selectEditor(el);
     const c = el.querySelector('.editor-text-content');
@@ -2707,14 +2718,84 @@ function startEditingText(el, caretPoint) {
 
     const onBlur = () => {
         el.classList.remove('editing');
-        if (!c.textContent.trim()) removeEditorEl(el);
-        // Désélectionner : la modification est validée. Sinon un Backspace
-        // ultérieur supprimerait toute la boîte (perçu comme "annulation").
-        else if (editorSelected === el) deselectEditor();
+        const txt = (c.innerText || '').replace(/\r/g, '');
+        if (!txt.trim()) {
+            removeEditorEl(el);
+        } else if (el.dataset.existing === '1') {
+            const meta = el._lineMeta;
+            if (meta && txt === meta.str) {
+                // Aucune modification : la ligne d'origine reste telle quelle
+                removeEditorEl(el);
+            } else {
+                // Validé : à l'écran, seule la partie modifiée reste couverte,
+                // le début de la ligne redevient les pixels d'origine du PDF
+                el.dataset.committedText = txt;
+                renderExistingDiffView(el, txt);
+                if (editorSelected === el) deselectEditor();
+            }
+        } else if (editorSelected === el) {
+            // Désélectionner : la modification est validée. Sinon un Backspace
+            // ultérieur supprimerait toute la boîte (perçu comme "annulation").
+            deselectEditor();
+        }
         c.removeEventListener('blur', onBlur);
         c.removeEventListener('keydown', onKey);
     };
     c.addEventListener('blur', onBlur);
+}
+
+// Vue "diff" après validation d'une ligne existante : la boîte devient
+// transparente sur le préfixe inchangé (les vrais glyphes du PDF
+// réapparaissent) et seul le suffixe modifié reste réécrit sur fond blanc
+let _measureCtx = null;
+function renderExistingDiffView(el, newText) {
+    const meta = el._lineMeta;
+    const c = el.querySelector('.editor-text-content');
+    if (!meta || !c) return;
+    el.querySelectorAll('.ed-diff-suffix').forEach(s => s.remove());
+
+    const orig = meta.str;
+    let p = 0;
+    while (p < newText.length && p < orig.length && newText[p] === orig[p]) p++;
+
+    // Point de divergence en px canvas (interpolation dans le fragment)
+    if (!_measureCtx) _measureCtx = document.createElement('canvas').getContext('2d');
+    _measureCtx.font = '16px Helvetica, Arial, sans-serif';
+    let xDivC;
+    if (p >= orig.length) {
+        const lp = meta.parts[meta.parts.length - 1];
+        xDivC = lp.cx + lp.cw;
+    } else {
+        xDivC = meta.parts[0].cx;
+        for (const pt of meta.parts) {
+            const start = pt.lineOffset, end = start + pt.str.length;
+            if (p <= start) { xDivC = pt.cx; break; }
+            if (p < end) {
+                const whole = _measureCtx.measureText(pt.str).width || 1;
+                const pre = _measureCtx.measureText(pt.str.slice(0, p - start)).width;
+                xDivC = pt.cx + pt.cw * (pre / whole);
+                break;
+            }
+            xDivC = pt.cx + pt.cw;
+        }
+    }
+
+    const dispScale = parseFloat(el.dataset.dispScale) || 1;
+    const lineCx = parseFloat(el.dataset.lineCx) || 0;
+    const lineCw = parseFloat(el.dataset.lineCw) || 0;
+    const offset = Math.max(0, (xDivC - lineCx) * dispScale);
+
+    const suffix = document.createElement('span');
+    suffix.className = 'ed-diff-suffix';
+    suffix.textContent = newText.slice(p);
+    suffix.style.left = offset + 'px';
+    // Couvre aussi la fin de l'ancienne ligne si le nouveau texte est plus court
+    suffix.style.minWidth = Math.max(4, (lineCx + lineCw - xDivC) * dispScale + 3) + 'px';
+    el.appendChild(suffix);
+
+    c.style.visibility = 'hidden';
+    el.style.background = 'transparent';
+    el.classList.add('ed-committed');
 }
 
 // Clic sur le document en mode ajout / désélection
@@ -2936,7 +3017,11 @@ async function embedEditorElements(pdfDoc, pages) {
             const font = bold ? helvBold : helv;
             const col = parseColor(el.style.color || '#111111');
             const content = el.querySelector('.editor-text-content');
-            const text = (content ? content.innerText : '').replace(/\r/g, '');
+            // Ligne existante validée : innerText d'un contenu masqué n'est pas
+            // fiable, on utilise le texte mémorisé à la validation
+            const text = (el.dataset.existing === '1' && el.dataset.committedText)
+                ? el.dataset.committedText
+                : (content ? content.innerText : '').replace(/\r/g, '');
             const lines = text.split('\n');
 
             // Texte existant modifié : export DIFFÉRENTIEL — le texte avant le
@@ -4043,6 +4128,55 @@ function estimateBackground(canvas) {
     smctx.drawImage(canvas, 0, 0, smallW, smallH);
     const sd = smctx.getImageData(0, 0, smallW, smallH);
 
+    // Le fond (papier) ne doit jamais être estimé depuis l'encre ou les
+    // graphiques : les pixels saturés (tampons, logos) ou très sombres sont
+    // masqués puis REMPLIS par propagation du niveau de papier des voisins
+    // (inpainting). Les grands aplats colorés ne polluent plus l'estimation
+    // — et gardent leur couleur après division — tandis que le niveau
+    // d'ombre local est correctement préservé, même en zone dense en texte.
+    {
+        const px = sd.data;
+        const mask = new Uint8Array(smallW * smallH);
+        for (let i = 0, j = 0; i < mask.length; i++, j += 4) {
+            const r = px[j], g = px[j + 1], b = px[j + 2];
+            const sat = Math.max(r, g, b) - Math.min(r, g, b);
+            const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+            if (sat > 55 || lum < 95) mask[i] = 1;
+        }
+        for (let it = 0; it < 12; it++) {
+            let changed = false;
+            for (let y = 0; y < smallH; y++) {
+                for (let x = 0; x < smallW; x++) {
+                    const i = y * smallW + x;
+                    if (!mask[i]) continue;
+                    let mr = -1, mg = 0, mb = 0;
+                    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+                        const yy = y + dy, xx = x + dx;
+                        if (yy < 0 || yy >= smallH || xx < 0 || xx >= smallW) continue;
+                        const n = yy * smallW + xx;
+                        if (mask[n]) continue;
+                        const nj = n * 4;
+                        if (px[nj] + px[nj + 1] + px[nj + 2] > mr + mg + mb) {
+                            mr = px[nj]; mg = px[nj + 1]; mb = px[nj + 2];
+                        }
+                    }
+                    if (mr >= 0) {
+                        const j = i * 4;
+                        px[j] = mr; px[j + 1] = mg; px[j + 2] = mb;
+                        mask[i] = 2;   // rempli (utilisable au tour suivant)
+                        changed = true;
+                    }
+                }
+            }
+            for (let i = 0; i < mask.length; i++) if (mask[i] === 2) mask[i] = 0;
+            if (!changed) break;
+        }
+        // Blobs trop larges pour être remplis : pas de correction (blanc)
+        for (let i = 0, j = 0; i < mask.length; i++, j += 4) {
+            if (mask[i]) { px[j] = px[j + 1] = px[j + 2] = 255; }
+        }
+    }
+
     const morph5 = (src, useMax) => {
         const out = new Uint8ClampedArray(src.length);
         for (let y = 0; y < smallH; y++) {
@@ -4107,23 +4241,53 @@ function estimateBackground(canvas) {
     return bgctx.getImageData(0, 0, w, h).data;
 }
 
-// Mode COULEUR: division par le fond estimé => ombres et reflets éliminés,
-// fond blanc, encre préservée ; puis contraste + accentuation du texte
+// Division par le fond estimé (par canal : ombres/reflets éliminés,
+// balance des blancs, teinte préservée)
+function divideByBackground(d, bg, target) {
+    for (let j = 0; j < d.length; j += 4) {
+        for (let c = 0; c < 3; c++) {
+            const v = d[j + c] / Math.max(1, bg[j + c]) * target;
+            d[j + c] = v > 255 ? 255 : v;
+        }
+    }
+}
+
+// Mode COULEUR "qualité scanner" :
+// 1. double passe d'aplanissement (la 2e efface les restes d'ombre que la
+//    1re estimation a manqués près des bords)
+// 2. courbe de niveaux sur la LUMINANCE seule + relance de saturation
+//    (les couleurs — tampons, logos, surlignages — ne sont plus délavées)
+// 3. accentuation légère
 function enhanceColor(canvas) {
     const w = canvas.width, h = canvas.height;
     const img = canvas.getContext('2d').getImageData(0, 0, w, h);
     const d = img.data;
     const n = w * h;
-    const bg = estimateBackground(canvas);
-    for (let i = 0; i < d.length; i += 4) {
+
+    // Passe 1
+    let bg = estimateBackground(canvas);
+    divideByBackground(d, bg, 250);
+    // Passe 2 : ré-estimer sur l'image déjà aplanie
+    const tmp = document.createElement('canvas');
+    tmp.width = w; tmp.height = h;
+    tmp.getContext('2d').putImageData(img, 0, 0);
+    bg = estimateBackground(tmp);
+    divideByBackground(d, bg, 252);
+
+    // Niveaux appliqués à la luminance uniquement, chroma relancée (x1.18)
+    for (let j = 0; j < d.length; j += 4) {
+        const r = d[j], g = d[j + 1], b = d[j + 2];
+        const l = 0.299 * r + 0.587 * g + 0.114 * b;
+        let l2 = (l - 40) * (255 / 200);
+        l2 = l2 < 0 ? 0 : l2 > 255 ? 255 : l2;
+        const gain = l > 2 ? l2 / l : 1;
         for (let c = 0; c < 3; c++) {
-            const b = Math.max(1, bg[i + c]);
-            let v = d[i + c] / b * 248;
-            // "Levels" doux : nettoie le papier sans surexposer l'image
-            v = (v - 45) * (255 / 205);
-            d[i + c] = v < 0 ? 0 : v > 255 ? 255 : v;
+            const v = d[j + c] * gain;
+            const out = l2 + (v - l2) * 1.18;
+            d[j + c] = out < 0 ? 0 : out > 255 ? 255 : out;
         }
     }
+
     // Accentuation légère (unsharp mask sur la luminance)
     const gray = new Float32Array(n);
     for (let i = 0, j = 0; i < n; i++, j += 4) {
