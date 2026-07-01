@@ -136,6 +136,10 @@
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
                 <span>Éditeur PDF</span>
             </button>
+            <button class="nav-tab" data-view="scanner" role="tab" aria-selected="false">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                <span>Scanner</span>
+            </button>
         </nav>
 
         <main>
@@ -297,6 +301,84 @@
                         <span>Placer à plusieurs endroits</span>
                     </label>
                     <span class="sig-placement-hint">Double-clic / appui long pour placer</span>
+                </div>
+            </section>
+
+            <!-- Section Scanner de documents -->
+            <section class="card" id="scanner-section" style="display: none;">
+                <div class="section-header">
+                    <div class="section-title">
+                        <h2>Scanner un document</h2>
+                    </div>
+                </div>
+
+                <!-- Étape 1 : capture -->
+                <div id="scan-capture">
+                    <input type="file" id="scan-input" accept="image/*" capture="environment" hidden>
+                    <input type="file" id="scan-input-gallery" accept="image/*" hidden>
+                    <div class="upload-area" id="scan-drop">
+                        <div class="drop-zone-content">
+                            <div class="drop-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                            </div>
+                            <p class="drop-text">Photographiez un document : il sera redressé et nettoyé comme avec un vrai scanner.</p>
+                            <div class="scan-capture-btns">
+                                <button class="btn btn-primary" id="scan-take-btn">
+                                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                                    Prendre une photo
+                                </button>
+                                <button class="btn btn-secondary" id="scan-gallery-btn">Choisir une image</button>
+                            </div>
+                            <p class="file-info">Posez le document sur un fond contrasté, bien à plat</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Étape 2 : ajustement des coins -->
+                <div id="scan-adjust" style="display:none">
+                    <p class="scan-step-label"><strong>1.</strong> Ajustez les coins sur les bords du document</p>
+                    <div class="scan-preview-wrap" id="scan-preview-wrap">
+                        <canvas id="scan-preview"></canvas>
+                        <svg id="scan-quad-svg" xmlns="http://www.w3.org/2000/svg">
+                            <polygon id="scan-quad-poly" points="" />
+                            <circle class="scan-handle" data-corner="0" r="14"/>
+                            <circle class="scan-handle" data-corner="1" r="14"/>
+                            <circle class="scan-handle" data-corner="2" r="14"/>
+                            <circle class="scan-handle" data-corner="3" r="14"/>
+                        </svg>
+                        <div id="scan-loupe" class="scan-loupe" style="display:none">
+                            <canvas id="scan-loupe-canvas" width="120" height="120"></canvas>
+                            <div class="scan-loupe-cross"></div>
+                        </div>
+                    </div>
+                    <div class="scan-actions">
+                        <button class="btn btn-ghost" id="scan-retake-btn">Reprendre</button>
+                        <button class="btn btn-primary" id="scan-validate-btn">
+                            Redresser
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Étape 3 : résultat + filtres -->
+                <div id="scan-result" style="display:none">
+                    <p class="scan-step-label"><strong>2.</strong> Choisissez le rendu</p>
+                    <div class="scan-modes">
+                        <button class="scan-mode-btn active" data-scan-mode="bw">Noir &amp; blanc</button>
+                        <button class="scan-mode-btn" data-scan-mode="color">Couleur</button>
+                        <button class="scan-mode-btn" data-scan-mode="original">Original</button>
+                    </div>
+                    <div class="scan-result-wrap">
+                        <canvas id="scan-result-canvas"></canvas>
+                        <div id="scan-processing" class="scan-processing" style="display:none">
+                            <div class="loading-spinner"></div>
+                        </div>
+                    </div>
+                    <div class="scan-actions">
+                        <button class="btn btn-ghost" id="scan-back-btn">Ajuster les coins</button>
+                        <button class="btn btn-success" id="scan-use-btn">Utiliser ce document</button>
+                        <button class="btn btn-primary" id="scan-pdf-btn">Télécharger en PDF</button>
+                    </div>
                 </div>
             </section>
 

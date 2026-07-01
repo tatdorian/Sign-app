@@ -391,14 +391,15 @@ header { margin-bottom: 24px; }
 }
 .app-nav-pill {
     position: absolute; top: 4px; left: 4px;
-    width: calc(50% - 4px); height: calc(100% - 8px);
+    width: calc((100% - 16px) / 3); height: calc(100% - 8px);
     background: var(--bg-card);
     border-radius: 980px;
     box-shadow: var(--shadow-sm);
     transition: transform var(--t);
     z-index: 0;
 }
-.app-nav[data-view="editor"] .app-nav-pill { transform: translateX(calc(100% + 4px)); }
+.app-nav[data-view="editor"]  .app-nav-pill { transform: translateX(calc(100% + 4px)); }
+.app-nav[data-view="scanner"] .app-nav-pill { transform: translateX(calc(200% + 8px)); }
 .nav-tab {
     position: relative; z-index: 1;
     flex: 1;
@@ -426,6 +427,99 @@ header { margin-bottom: 24px; }
 .view-editor #toggle-annotation-btn { display: none; }
 /* Éléments d'édition inertes hors service éditeur */
 .view-signature .editor-el { pointer-events: none; }
+
+/* =============================================
+   SCANNER DE DOCUMENTS
+   ============================================= */
+.scan-capture-btns { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.scan-step-label { font-size: .88em; color: var(--label-2); margin-bottom: 10px; }
+.scan-step-label strong { color: var(--blue); }
+
+.scan-preview-wrap {
+    position: relative;
+    border-radius: var(--r);
+    overflow: hidden;
+    background: #000;
+    line-height: 0;
+    touch-action: none;
+    user-select: none; -webkit-user-select: none;
+}
+#scan-preview { display: block; width: 100%; height: auto; }
+
+#scan-quad-svg {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    touch-action: none;
+}
+#scan-quad-poly {
+    fill: rgba(124,58,237,.18);
+    stroke: #A78BFA;
+    stroke-width: 2.5;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+}
+.scan-handle {
+    fill: #fff;
+    stroke: var(--blue);
+    stroke-width: 3;
+    cursor: grab;
+    touch-action: none;
+}
+.scan-handle:active { cursor: grabbing; }
+
+.scan-loupe {
+    position: absolute;
+    width: 120px; height: 120px;
+    border-radius: 50%;
+    overflow: hidden;
+    border: 3px solid #fff;
+    box-shadow: 0 4px 18px rgba(0,0,0,.45);
+    pointer-events: none;
+    z-index: 5;
+}
+.scan-loupe-cross {
+    position: absolute; inset: 0;
+    background:
+        linear-gradient(to right, transparent calc(50% - 1px), rgba(124,58,237,.9) calc(50% - 1px), rgba(124,58,237,.9) calc(50% + 1px), transparent calc(50% + 1px)),
+        linear-gradient(to bottom, transparent calc(50% - 1px), rgba(124,58,237,.9) calc(50% - 1px), rgba(124,58,237,.9) calc(50% + 1px), transparent calc(50% + 1px));
+}
+
+.scan-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+.scan-actions .btn { flex: 1; min-width: 120px; }
+
+.scan-modes { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+.scan-mode-btn {
+    flex: 1; min-width: 90px;
+    padding: 9px 12px;
+    background: var(--bg-input);
+    border: 1.5px solid transparent;
+    border-radius: var(--r-sm);
+    color: var(--label-2);
+    font-family: inherit; font-size: .84em; font-weight: 600;
+    cursor: pointer;
+    transition: all var(--t);
+}
+.scan-mode-btn.active {
+    background: var(--bg-selected);
+    border-color: var(--blue);
+    color: var(--blue);
+}
+
+.scan-result-wrap {
+    position: relative;
+    border-radius: var(--r);
+    overflow: hidden;
+    background: var(--bg-subtle);
+    border: 1px solid var(--separator);
+    line-height: 0;
+}
+#scan-result-canvas { display: block; width: 100%; height: auto; }
+.scan-processing {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,.35);
+    backdrop-filter: blur(2px);
+}
 
 /* =============================================
    CARDS
