@@ -1071,6 +1071,13 @@ input[type="range"]::-moz-range-thumb {
 .editor-mode .paraphe-overlay { pointer-events: none !important; }
 .editor-mode.editor-add-mode .pdf-page-canvas,
 .editor-mode.editor-add-mode .document-preview { cursor: crosshair; }
+.editor-mode.editor-edittext-mode .pdf-page-canvas { cursor: text; }
+
+/* Édition d'un texte déjà présent dans le PDF */
+.editor-el-existing {
+    outline: 1px dashed rgba(124,58,237,.4);
+    outline-offset: 0;
+}
 
 .editor-el {
     position: absolute;

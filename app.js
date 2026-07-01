@@ -27,7 +27,9 @@ const state = {
     previewVisible: false,
     // Outils par cible: 'pen' | 'highlighter' | 'eraser'
     signatureTool: 'pen',
-    parapheTool: 'pen'
+    parapheTool: 'pen',
+    // Texte extrait du PDF par page (pour l'édition inline du texte existant)
+    pageTextRuns: {}
 };
 
 // ==============================================
@@ -431,6 +433,8 @@ async function loadPDF(file) {
     const fitScale = containerWidth / baseViewport.width;
     const renderScale = Math.max(1.5, fitScale);
 
+    state.pageTextRuns = {};
+
     for (let pageNum = 1; pageNum <= numPages; pageNum++) {
         const page = await pdf.getPage(pageNum);
         const viewport = page.getViewport({ scale: renderScale });
@@ -449,6 +453,27 @@ async function loadPDF(file) {
             canvasContext: context,
             viewport: viewport
         }).promise;
+
+        // Extraire le texte existant (positions en pixels canvas) pour l'édition inline
+        try {
+            const textContent = await page.getTextContent();
+            const runs = [];
+            const Util = pdfjsLib.Util;
+            for (const item of textContent.items) {
+                if (!item.str || !item.str.trim()) continue;
+                const tx = Util.transform(viewport.transform, item.transform);
+                const fontHeight = Math.hypot(tx[2], tx[3]);
+                const left = tx[4];
+                const top = tx[5] - fontHeight;
+                const width = (item.width || 0) * viewport.scale;
+                if (width < 1 || fontHeight < 1) continue;
+                runs.push({ str: item.str, cx: left, cy: top, cw: width, ch: fontHeight });
+            }
+            state.pageTextRuns[pageNum] = runs;
+        } catch (err) {
+            console.warn('Extraction texte page ' + pageNum + ':', err);
+            state.pageTextRuns[pageNum] = [];
+        }
 
         const pageLabel = document.createElement('div');
         pageLabel.className = 'page-label';
@@ -2200,7 +2225,10 @@ function syncEditorOverlayHeight() {
 function setEditorTool(tool) {
     editorTool = tool;
     document.querySelectorAll('.ed-tool').forEach(b => b.classList.toggle('active', b.dataset.edTool === tool));
-    if (documentPreview) documentPreview.classList.toggle('editor-add-mode', tool !== 'select');
+    if (documentPreview) {
+        documentPreview.classList.toggle('editor-add-mode', tool !== 'select' && tool !== 'edit-text');
+        documentPreview.classList.toggle('editor-edittext-mode', tool === 'edit-text');
+    }
     if (tool === 'image') {
         if (edImageInput) edImageInput.click();
         // rester en 'select' après ouverture du sélecteur
@@ -2309,6 +2337,65 @@ function addEditorElement(type, x, y, opts) {
     editorOverlay.appendChild(el);
     selectEditor(el);
     return el;
+}
+
+// Trouver le bloc de texte du PDF sous le pointeur
+function hitTestExistingText(clientX, clientY) {
+    const pagesContainer = document.getElementById('pdf-pages-container');
+    if (!pagesContainer) return null;
+    const containers = pagesContainer.querySelectorAll('.pdf-page-container');
+    for (const cont of containers) {
+        const canvas = cont.querySelector('.pdf-page-canvas');
+        if (!canvas) continue;
+        const rect = canvas.getBoundingClientRect();
+        if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) continue;
+        const pageNum = parseInt(cont.dataset.pageNumber);
+        const runs = state.pageTextRuns[pageNum] || [];
+        const scale = rect.width / canvas.width;
+        const cx = (clientX - rect.left) / scale;
+        const cy = (clientY - rect.top) / scale;
+        let best = null, bestDist = Infinity;
+        for (const r of runs) {
+            const pad = Math.max(2, r.ch * 0.35);
+            if (cx >= r.cx - pad && cx <= r.cx + r.cw + pad && cy >= r.cy - pad && cy <= r.cy + r.ch + pad) {
+                const dcx = cx - (r.cx + r.cw / 2), dcy = cy - (r.cy + r.ch / 2);
+                const d = dcx * dcx + dcy * dcy;
+                if (d < bestDist) { bestDist = d; best = r; }
+            }
+        }
+        return best ? { run: best, pageNum, canvas, rect, scale } : null;
+    }
+    return null;
+}
+
+// Créer une zone éditable par-dessus un texte existant (le couvre et sera masqué à l'export)
+function createExistingTextEdit(hit) {
+    const { run, canvas, rect, scale, pageNum } = hit;
+    const dpRect = documentPreview.getBoundingClientRect();
+    const left = (rect.left - dpRect.left) + run.cx * scale;
+    const top = (rect.top - dpRect.top) + run.cy * scale;
+    const fontPx = Math.max(6, run.ch * scale);
+    const wpx = Math.max(40, run.cw * scale + 12);
+
+    const el = addEditorElement('text', 0, 0, { text: run.str });
+    el.classList.add('editor-el-existing');
+    el.dataset.existing = '1';
+    el.dataset.origPage = pageNum;
+    el.dataset.origFracX = run.cx / canvas.width;
+    el.dataset.origFracY = run.cy / canvas.height;
+    el.dataset.origFracW = run.cw / canvas.width;
+    el.dataset.origFracH = run.ch / canvas.height;
+    el.style.left = left + 'px';
+    el.style.top = top + 'px';
+    el.style.width = wpx + 'px';
+    el.style.fontSize = fontPx + 'px';
+    el.style.color = '#111111';
+    el.dataset.color = '#111111';
+    el.style.fontWeight = '400';
+    // Couvrir le texte d'origine (fond page supposé uni/blanc — best-effort)
+    el.style.background = '#ffffff';
+    startEditingText(el);
+    refreshFormatBar();
 }
 
 function removeEditorEl(el) {
@@ -2452,6 +2539,13 @@ if (documentPreview) {
         if (!editorMode) return;
         if (e.target.closest('.editor-el')) return;   // interaction avec un élément existant
         if (editorTool === 'select') { deselectEditor(); return; }
+
+        // Modifier le texte existant : clic sur un texte du PDF
+        if (editorTool === 'edit-text') {
+            const hit = hitTestExistingText(e.clientX, e.clientY);
+            if (hit) createExistingTextEdit(hit);
+            return;   // rester dans l'outil pour enchaîner les modifications
+        }
 
         const rect = documentPreview.getBoundingClientRect();
         const x = e.clientX - rect.left;
@@ -2648,6 +2742,19 @@ async function embedEditorElements(pdfDoc, pages) {
                 } catch (err) { console.warn('Export image éditeur:', err); }
             }
         } else if (type === 'text') {
+            // Texte existant modifié : masquer d'abord l'original à son emplacement
+            if (el.dataset.existing === '1') {
+                const op = parseInt(el.dataset.origPage) || pageNum;
+                if (op >= 1 && op <= pages.length) {
+                    const opage = pages[op - 1];
+                    const os = opage.getSize();
+                    const ox = (parseFloat(el.dataset.origFracX) || 0) * os.width;
+                    const ow = (parseFloat(el.dataset.origFracW) || 0) * os.width;
+                    const oh = (parseFloat(el.dataset.origFracH) || 0) * os.height;
+                    const oy = os.height - ((parseFloat(el.dataset.origFracY) || 0) * os.height) - oh;
+                    opage.drawRectangle({ x: ox - 1, y: oy - 1, width: ow + 2, height: oh + 2, color: rgb(1, 1, 1) });
+                }
+            }
             if (!helv) {
                 helv = await pdfDoc.embedFont(StandardFonts.Helvetica);
                 helvBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
