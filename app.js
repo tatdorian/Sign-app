@@ -2211,10 +2211,12 @@ function enableEditorMode(on) {
     if (documentPreview) documentPreview.classList.toggle('editor-mode', on);
     if (!on) {
         if (documentPreview) documentPreview.classList.remove('editor-add-mode');
+        removeEditTextTargets();
         deselectEditor();
     } else {
         syncEditorOverlayHeight();
         refreshFormatBar();
+        if (editorTool === 'edit-text') showEditTextTargets();
     }
 }
 
@@ -2237,6 +2239,8 @@ function setEditorTool(tool) {
         documentPreview.classList.toggle('editor-add-mode', tool !== 'select' && tool !== 'edit-text');
         documentPreview.classList.toggle('editor-edittext-mode', tool === 'edit-text');
     }
+    if (tool === 'edit-text') showEditTextTargets();
+    else removeEditTextTargets();
     if (tool === 'image') {
         if (edImageInput) edImageInput.click();
         // rester en 'select' après ouverture du sélecteur
@@ -2347,59 +2351,136 @@ function addEditorElement(type, x, y, opts) {
     return el;
 }
 
-// Trouver le bloc de texte du PDF sous le pointeur
-function hitTestExistingText(clientX, clientY) {
-    const pagesContainer = document.getElementById('pdf-pages-container');
-    if (!pagesContainer) return null;
-    const containers = pagesContainer.querySelectorAll('.pdf-page-container');
-    for (const cont of containers) {
-        const canvas = cont.querySelector('.pdf-page-canvas');
-        if (!canvas) continue;
-        const rect = canvas.getBoundingClientRect();
-        if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) continue;
-        const pageNum = parseInt(cont.dataset.pageNumber);
-        const runs = state.pageTextRuns[pageNum] || [];
-        const scale = rect.width / canvas.width;
-        const cx = (clientX - rect.left) / scale;
-        const cy = (clientY - rect.top) / scale;
-        let best = null, bestDist = Infinity;
-        for (const r of runs) {
-            const pad = Math.max(2, r.ch * 0.35);
-            if (cx >= r.cx - pad && cx <= r.cx + r.cw + pad && cy >= r.cy - pad && cy <= r.cy + r.ch + pad) {
-                const dcx = cx - (r.cx + r.cw / 2), dcy = cy - (r.cy + r.ch / 2);
-                const d = dcx * dcx + dcy * dcy;
-                if (d < bestDist) { bestDist = d; best = r; }
-            }
+// Fusionner les fragments de texte pdf.js en LIGNES (comme un traitement de texte)
+function getPageTextLines(pageNum) {
+    const runs = state.pageTextRuns[pageNum] || [];
+    const sorted = runs.slice().sort((a, b) => a.cy - b.cy || a.cx - b.cx);
+    const lines = [];
+    for (const r of sorted) {
+        const line = lines.find(L => {
+            const overlap = Math.min(L.cy + L.ch, r.cy + r.ch) - Math.max(L.cy, r.cy);
+            return overlap > 0.5 * Math.min(L.ch, r.ch);
+        });
+        if (!line) {
+            lines.push({ cx: r.cx, cy: r.cy, cw: r.cw, ch: r.ch, parts: [r] });
+        } else {
+            line.parts.push(r);
+            const x2 = Math.max(line.cx + line.cw, r.cx + r.cw);
+            const y2 = Math.max(line.cy + line.ch, r.cy + r.ch);
+            line.cx = Math.min(line.cx, r.cx);
+            line.cy = Math.min(line.cy, r.cy);
+            line.cw = x2 - line.cx;
+            line.ch = y2 - line.cy;
         }
-        return best ? { run: best, pageNum, canvas, rect, scale } : null;
     }
-    return null;
+    for (const L of lines) {
+        L.parts.sort((a, b) => a.cx - b.cx);
+        let str = '', prevEnd = null;
+        for (const p of L.parts) {
+            if (prevEnd !== null && p.cx - prevEnd > L.ch * 0.22 && !str.endsWith(' ') && !p.str.startsWith(' ')) str += ' ';
+            str += p.str;
+            prevEnd = p.cx + p.cw;
+        }
+        L.str = str;
+    }
+    return lines;
 }
 
-// Créer une zone éditable par-dessus un texte existant (le couvre et sera masqué à l'export)
-function createExistingTextEdit(hit) {
-    const { run, canvas, rect, scale, pageNum } = hit;
-    const dpRect = documentPreview.getBoundingClientRect();
-    const left = (rect.left - dpRect.left) + run.cx * scale;
-    const top = (rect.top - dpRect.top) + run.cy * scale;
-    const fontPx = Math.max(6, run.ch * scale);
-    const wpx = Math.max(40, run.cw * scale + 12);
+// Lignes déjà transformées en zone d'édition (pour ne pas recréer de cible dessus)
+const editedLineKeys = new Set();
 
-    const el = addEditorElement('text', 0, 0, { text: run.str });
+// Afficher des cibles cliquables sur CHAQUE ligne de texte du PDF.
+// L'utilisateur voit immédiatement ce qui est modifiable — clic = édition.
+function showEditTextTargets() {
+    removeEditTextTargets();
+    if (!editorOverlay) return;
+    const pagesContainer = document.getElementById('pdf-pages-container');
+    if (!pagesContainer) return;
+    const dpRect = documentPreview.getBoundingClientRect();
+    let total = 0;
+    pagesContainer.querySelectorAll('.pdf-page-container').forEach(cont => {
+        const pageNum = parseInt(cont.dataset.pageNumber);
+        const canvas = cont.querySelector('.pdf-page-canvas');
+        if (!canvas) return;
+        const rect = canvas.getBoundingClientRect();
+        const scale = rect.width / canvas.width;
+        for (const line of getPageTextLines(pageNum)) {
+            total++;
+            const key = pageNum + ':' + Math.round(line.cy) + ':' + Math.round(line.cx);
+            if (editedLineKeys.has(key)) continue;
+            const t = document.createElement('div');
+            t.className = 'edit-text-target';
+            t.style.left = ((rect.left - dpRect.left) + line.cx * scale - 3) + 'px';
+            t.style.top = ((rect.top - dpRect.top) + line.cy * scale - 2) + 'px';
+            t.style.width = (line.cw * scale + 6) + 'px';
+            t.style.height = (line.ch * scale + 4) + 'px';
+            t.title = 'Cliquer pour modifier ce texte';
+            t.addEventListener('pointerdown', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                editedLineKeys.add(key);
+                t.remove();
+                createExistingTextEdit(line, pageNum, canvas, key);
+            });
+            editorOverlay.appendChild(t);
+        }
+    });
+    if (total === 0) {
+        alert('Aucun texte détecté dans ce document.\nS\'il s\'agit d\'un scan (image), le texte n\'est pas modifiable directement : utilisez l\'outil « Cache » + « Texte » pour le recouvrir.');
+    }
+}
+
+function removeEditTextTargets() {
+    if (editorOverlay) editorOverlay.querySelectorAll('.edit-text-target').forEach(t => t.remove());
+}
+
+// Couleur du texte d'origine : moyenne des pixels sombres dans la zone
+function sampleTextColor(canvas, line) {
+    try {
+        const x = Math.max(0, Math.round(line.cx)), y = Math.max(0, Math.round(line.cy));
+        const w = Math.min(canvas.width - x, Math.round(line.cw)), h = Math.min(canvas.height - y, Math.round(line.ch));
+        if (w < 1 || h < 1) return '#111111';
+        const d = canvas.getContext('2d').getImageData(x, y, w, h).data;
+        let r = 0, g = 0, b = 0, count = 0;
+        for (let i = 0; i < d.length; i += 4) {
+            const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+            if (lum < 130) { r += d[i]; g += d[i + 1]; b += d[i + 2]; count++; }
+        }
+        if (!count) return '#111111';
+        const hex = v => Math.round(v / count).toString(16).padStart(2, '0');
+        return '#' + hex(r) + hex(g) + hex(b);
+    } catch (e) { return '#111111'; }
+}
+
+// Créer la zone éditable par-dessus une ligne existante
+// (l'original est couvert à l'écran et masqué dans le PDF exporté)
+function createExistingTextEdit(line, pageNum, canvas, lineKey) {
+    const dpRect = documentPreview.getBoundingClientRect();
+    const rect = canvas.getBoundingClientRect();
+    const scale = rect.width / canvas.width;
+    const left = (rect.left - dpRect.left) + line.cx * scale;
+    const top = (rect.top - dpRect.top) + line.cy * scale;
+    const fontPx = Math.max(6, line.ch * scale * 0.92);
+    const wpx = Math.max(40, line.cw * scale + 14);
+    const color = sampleTextColor(canvas, line);
+
+    const el = addEditorElement('text', 0, 0, { text: line.str });
     el.classList.add('editor-el-existing');
     el.dataset.existing = '1';
+    el.dataset.lineKey = lineKey || '';
     el.dataset.origPage = pageNum;
-    el.dataset.origFracX = run.cx / canvas.width;
-    el.dataset.origFracY = run.cy / canvas.height;
-    el.dataset.origFracW = run.cw / canvas.width;
-    el.dataset.origFracH = run.ch / canvas.height;
+    el.dataset.origFracX = line.cx / canvas.width;
+    el.dataset.origFracY = line.cy / canvas.height;
+    el.dataset.origFracW = line.cw / canvas.width;
+    el.dataset.origFracH = line.ch / canvas.height;
     el.style.left = left + 'px';
     el.style.top = top + 'px';
     el.style.width = wpx + 'px';
     el.style.fontSize = fontPx + 'px';
-    el.style.color = '#111111';
-    el.dataset.color = '#111111';
+    el.style.color = color;
+    el.dataset.color = color;
     el.style.fontWeight = '400';
+    el.style.lineHeight = '1.15';
     // Couvrir le texte d'origine (fond page supposé uni/blanc — best-effort)
     el.style.background = '#ffffff';
     startEditingText(el);
@@ -2409,6 +2490,11 @@ function createExistingTextEdit(hit) {
 function removeEditorEl(el) {
     if (!el) return;
     if (editorSelected === el) editorSelected = null;
+    // Ligne existante rendue de nouveau éditable si sa zone est supprimée
+    if (el.dataset.lineKey) {
+        editedLineKeys.delete(el.dataset.lineKey);
+        if (editorTool === 'edit-text') showEditTextTargets();
+    }
     el.remove();
     refreshFormatBar();
 }
@@ -2548,12 +2634,8 @@ if (documentPreview) {
         if (e.target.closest('.editor-el')) return;   // interaction avec un élément existant
         if (editorTool === 'select') { deselectEditor(); return; }
 
-        // Modifier le texte existant : clic sur un texte du PDF
-        if (editorTool === 'edit-text') {
-            const hit = hitTestExistingText(e.clientX, e.clientY);
-            if (hit) createExistingTextEdit(hit);
-            return;   // rester dans l'outil pour enchaîner les modifications
-        }
+        // Modifier le texte existant : les cibles cliquables gèrent le clic
+        if (editorTool === 'edit-text') return;
 
         const rect = documentPreview.getBoundingClientRect();
         const x = e.clientX - rect.left;
@@ -2671,11 +2753,17 @@ document.addEventListener('keydown', (e) => {
 
 function resetEditor() {
     if (editorOverlay) editorOverlay.querySelectorAll('.editor-el').forEach(e => e.remove());
+    removeEditTextTargets();
+    editedLineKeys.clear();
     deselectEditor();
     setEditorTool('select');
 }
 
-window.addEventListener('resize', () => { if (documentLoaded) syncEditorOverlayHeight(); });
+window.addEventListener('resize', () => {
+    if (!documentLoaded) return;
+    syncEditorOverlayHeight();
+    if (editorMode && editorTool === 'edit-text') showEditTextTargets();
+});
 
 // ==============================================
 // ÉDITEUR : aplatissement dans le PDF exporté
@@ -2751,6 +2839,7 @@ async function embedEditorElements(pdfDoc, pages) {
             }
         } else if (type === 'text') {
             // Texte existant modifié : masquer d'abord l'original à son emplacement
+            // (marge verticale généreuse pour couvrir descendantes et accents)
             if (el.dataset.existing === '1') {
                 const op = parseInt(el.dataset.origPage) || pageNum;
                 if (op >= 1 && op <= pages.length) {
@@ -2760,7 +2849,13 @@ async function embedEditorElements(pdfDoc, pages) {
                     const ow = (parseFloat(el.dataset.origFracW) || 0) * os.width;
                     const oh = (parseFloat(el.dataset.origFracH) || 0) * os.height;
                     const oy = os.height - ((parseFloat(el.dataset.origFracY) || 0) * os.height) - oh;
-                    opage.drawRectangle({ x: ox - 1, y: oy - 1, width: ow + 2, height: oh + 2, color: rgb(1, 1, 1) });
+                    opage.drawRectangle({
+                        x: ox - 2,
+                        y: oy - oh * 0.32,
+                        width: ow + 4,
+                        height: oh * 1.5,
+                        color: rgb(1, 1, 1)
+                    });
                 }
             }
             if (!helv) {
@@ -2802,7 +2897,8 @@ const scanState = {
     source: null,     // canvas source plein format (plafonné)
     quad: null,       // 4 coins normalisés [0..1] — ordre TL,TR,BR,BL
     warped: null,     // canvas redressé (avant filtres)
-    mode: 'bw'
+    mode: 'bw',
+    pages: []         // pages déjà scannées (canvas) pour un PDF multi-pages
 };
 
 const scanSection     = document.getElementById('scanner-section');
@@ -3084,28 +3180,143 @@ function detectDocumentQuad(srcCanvas) {
             }
         }
 
-        // Seuils d'hystérésis auto : percentiles décroissants.
-        // Le texte du document produit des gradients très forts qui tirent le
-        // percentile vers le haut ; si aucun quad n'émerge, on abaisse le seuil
-        // jusqu'à récupérer le bord (moins contrasté) du document.
+        // Stratégie 1 — Canny multi-seuils : le texte du document produit des
+        // gradients très forts qui tirent le percentile vers le haut ; on teste
+        // plusieurs seuils décroissants et on garde tous les quads candidats.
         const sample = [];
         for (let i = 0; i < nms.length; i += 7) if (nms[i] > 0) sample.push(nms[i]);
         sample.sort((a, b) => a - b);
         if (!sample.length) return null;
 
+        const supportThr = sample[Math.floor(sample.length * 0.25)];
+        const candidates = [];
         for (const pct of [0.9, 0.78, 0.62, 0.45, 0.3]) {
             const high = sample[Math.floor(sample.length * pct)];
-            const low = high * 0.4;
-            const best = quadFromNms(nms, w, h, high, low);
-            if (best) {
-                return orderQuad(best.map(p => ({ x: p[0] / w, y: p[1] / h })));
-            }
+            const q = quadFromNms(nms, w, h, high, high * 0.4);
+            if (q) candidates.push(q);
         }
-        return null;
+
+        // Stratégie 2 — segmentation d'Otsu : le document est généralement la
+        // grande région CLAIRE de la photo. Robuste quand les bords de Canny
+        // sont coupés (faible contraste local, doigt sur le bord…).
+        const otsuQuad = quadFromBrightRegion(gray, w, h);
+        if (otsuQuad) candidates.push(otsuQuad);
+
+        // Sélection : angles plausibles + score aire × adhérence aux gradients
+        let best = null, bestScore = 0;
+        const totalArea = w * h;
+        for (const q of candidates) {
+            if (!quadAnglesOk(q)) continue;
+            const areaRatio = polygonArea(q) / totalArea;
+            if (areaRatio < 0.15 || areaRatio > 0.99) continue;
+            const support = quadEdgeSupport(q, nms, w, h, supportThr);
+            const score = areaRatio * (0.35 + support);
+            if (score > bestScore) { bestScore = score; best = q; }
+        }
+
+        if (!best) return null;
+        return orderQuad(best.map(p => ({ x: p[0] / w, y: p[1] / h })));
     } catch (err) {
         console.warn('Détection coins:', err);
         return null;
     }
+}
+
+// Segmentation de la région claire (Otsu) -> plus grande composante -> quad
+function quadFromBrightRegion(gray, w, h) {
+    const hist = new Float64Array(256);
+    for (let i = 0; i < gray.length; i++) {
+        const g = gray[i] < 0 ? 0 : gray[i] > 255 ? 255 : gray[i] | 0;
+        hist[g]++;
+    }
+    const total = gray.length;
+    let sum = 0;
+    for (let t = 0; t < 256; t++) sum += t * hist[t];
+    let sumB = 0, wB = 0, maxVar = 0, thresh = 127;
+    for (let t = 0; t < 256; t++) {
+        wB += hist[t];
+        if (!wB) continue;
+        const wF = total - wB;
+        if (!wF) break;
+        sumB += t * hist[t];
+        const mB = sumB / wB, mF = (sum - sumB) / wF;
+        const v = wB * wF * (mB - mF) * (mB - mF);
+        if (v > maxVar) { maxVar = v; thresh = t; }
+    }
+
+    const mask = new Uint8Array(w * h);
+    for (let i = 0; i < gray.length; i++) mask[i] = gray[i] > thresh ? 1 : 0;
+
+    // Plus grande composante claire
+    const seen = new Uint8Array(w * h);
+    let bestQuad = null, bestArea = 0;
+    for (let i = 0; i < mask.length; i++) {
+        if (!mask[i] || seen[i]) continue;
+        const pts = [];
+        const st = [i]; seen[i] = 1;
+        while (st.length) {
+            const c = st.pop();
+            const cy = (c / w) | 0, cx = c % w;
+            pts.push([cx, cy]);
+            for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+                const ny = cy + dy, nx2 = cx + dx;
+                if (ny < 0 || ny >= h || nx2 < 0 || nx2 >= w) continue;
+                const n = ny * w + nx2;
+                if (mask[n] && !seen[n]) { seen[n] = 1; st.push(n); }
+            }
+        }
+        if (pts.length < w * h * 0.12) continue;
+        const hull = convexHull(pts);
+        if (hull.length < 4) continue;
+        const quad = hullToQuad(hull);
+        if (!quad) continue;
+        const qa = polygonArea(quad);
+        // La composante doit remplir son quad (rejette les fonds clairs troués)
+        if (qa < w * h * 0.15 || pts.length < qa * 0.55) continue;
+        if (qa > bestArea) { bestArea = qa; bestQuad = quad; }
+    }
+    return bestQuad;
+}
+
+// Angles internes plausibles pour une feuille photographiée (32°..148°)
+function quadAnglesOk(quad) {
+    for (let i = 0; i < 4; i++) {
+        const p = quad[(i + 3) % 4], q = quad[i], r = quad[(i + 1) % 4];
+        const v1x = p[0] - q[0], v1y = p[1] - q[1];
+        const v2x = r[0] - q[0], v2y = r[1] - q[1];
+        const n1 = Math.hypot(v1x, v1y), n2 = Math.hypot(v2x, v2y);
+        if (n1 < 4 || n2 < 4) return false;
+        const cos = (v1x * v2x + v1y * v2y) / (n1 * n2);
+        const ang = Math.acos(Math.max(-1, Math.min(1, cos))) * 180 / Math.PI;
+        if (ang < 32 || ang > 148) return false;
+    }
+    return true;
+}
+
+// Fraction du périmètre du quad posée sur un gradient fort
+function quadEdgeSupport(quad, nms, w, h, thr) {
+    let hit = 0, tot = 0;
+    for (let e = 0; e < 4; e++) {
+        const a = quad[e], b = quad[(e + 1) % 4];
+        const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        const steps = Math.max(8, Math.round(len / 2));
+        for (let s = 0; s <= steps; s++) {
+            const t = s / steps;
+            const x = Math.round(a[0] + (b[0] - a[0]) * t);
+            const y = Math.round(a[1] + (b[1] - a[1]) * t);
+            tot++;
+            let found = 0;
+            for (let dy = -2; dy <= 2 && !found; dy++) {
+                for (let dx = -2; dx <= 2; dx++) {
+                    const yy = y + dy, xx = x + dx;
+                    if (yy < 0 || yy >= h || xx < 0 || xx >= w) continue;
+                    if (nms[yy * w + xx] >= thr) { found = 1; break; }
+                }
+            }
+            hit += found;
+        }
+    }
+    return tot ? hit / tot : 0;
 }
 
 // Hystérésis + composantes connexes + enveloppe convexe -> meilleur quad
@@ -3297,7 +3508,7 @@ function warpDocument(srcCanvas, quadNorm) {
     // Rétrécir légèrement vers le centre pour ne pas inclure le bord/fond
     const cx = quad.reduce((s, p) => s + p.x, 0) / 4;
     const cy = quad.reduce((s, p) => s + p.y, 0) / 4;
-    const shrink = 0.006;
+    const shrink = 0.012;
     quad = quad.map(p => ({ x: p.x + (cx - p.x) * shrink, y: p.y + (cy - p.y) * shrink }));
     const [tl, tr, br, bl] = quad;
 
@@ -3376,24 +3587,30 @@ function estimateBackground(canvas) {
     const sd = smctx.getImageData(0, 0, smallW, smallH);
     const px = sd.data;
 
-    // Filtre max 5x5 par canal (le fond est l'enveloppe claire)
-    const maxed = new Uint8ClampedArray(px.length);
-    for (let y = 0; y < smallH; y++) {
-        for (let x = 0; x < smallW; x++) {
-            let mr = 0, mg = 0, mb = 0;
-            for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
-                const yy = Math.min(smallH - 1, Math.max(0, y + dy));
-                const xx = Math.min(smallW - 1, Math.max(0, x + dx));
-                const i = (yy * smallW + xx) * 4;
-                if (px[i] > mr) mr = px[i];
-                if (px[i + 1] > mg) mg = px[i + 1];
-                if (px[i + 2] > mb) mb = px[i + 2];
+    // Filtre max 5x5 par canal, appliqué deux fois : le fond est l'enveloppe
+    // claire — les ombres ET le texte disparaissent de l'estimation, les
+    // reflets y restent et seront donc normalisés eux aussi par la division
+    let cur = px;
+    for (let pass = 0; pass < 2; pass++) {
+        const maxed = new Uint8ClampedArray(cur.length);
+        for (let y = 0; y < smallH; y++) {
+            for (let x = 0; x < smallW; x++) {
+                let mr = 0, mg = 0, mb = 0;
+                for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+                    const yy = Math.min(smallH - 1, Math.max(0, y + dy));
+                    const xx = Math.min(smallW - 1, Math.max(0, x + dx));
+                    const i = (yy * smallW + xx) * 4;
+                    if (cur[i] > mr) mr = cur[i];
+                    if (cur[i + 1] > mg) mg = cur[i + 1];
+                    if (cur[i + 2] > mb) mb = cur[i + 2];
+                }
+                const o = (y * smallW + x) * 4;
+                maxed[o] = mr; maxed[o + 1] = mg; maxed[o + 2] = mb; maxed[o + 3] = 255;
             }
-            const o = (y * smallW + x) * 4;
-            maxed[o] = mr; maxed[o + 1] = mg; maxed[o + 2] = mb; maxed[o + 3] = 255;
         }
+        cur = maxed;
     }
-    sd.data.set(maxed);
+    sd.data.set(cur);
     smctx.putImageData(sd, 0, 0);
 
     // Remise à l'échelle avec lissage bilinéaire natif = flou du fond
@@ -3406,19 +3623,34 @@ function estimateBackground(canvas) {
     return bgctx.getImageData(0, 0, w, h).data;
 }
 
-// Mode COULEUR: division par le fond => fond blanc, encre préservée
+// Mode COULEUR: division par le fond estimé => ombres et reflets éliminés,
+// fond blanc, encre préservée ; puis contraste + accentuation du texte
 function enhanceColor(canvas) {
     const w = canvas.width, h = canvas.height;
     const img = canvas.getContext('2d').getImageData(0, 0, w, h);
     const d = img.data;
+    const n = w * h;
     const bg = estimateBackground(canvas);
     for (let i = 0; i < d.length; i += 4) {
         for (let c = 0; c < 3; c++) {
             const b = Math.max(1, bg[i + c]);
-            let v = d[i + c] / b * 250;
-            // Légère courbe de contraste
-            v = (v - 128) * 1.12 + 132;
+            let v = d[i + c] / b * 252;
+            // Courbe de contraste (assombrit l'encre, blanchit le papier)
+            v = (v - 140) * 1.22 + 148;
             d[i + c] = v < 0 ? 0 : v > 255 ? 255 : v;
+        }
+    }
+    // Accentuation (unsharp mask sur la luminance)
+    const gray = new Float32Array(n);
+    for (let i = 0, j = 0; i < n; i++, j += 4) {
+        gray[i] = 0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2];
+    }
+    const blurred = gaussianBlur5(gray, w, h);
+    for (let i = 0, j = 0; i < n; i++, j += 4) {
+        const boost = 0.55 * (gray[i] - blurred[i]);
+        for (let c = 0; c < 3; c++) {
+            const v = d[j + c] + boost;
+            d[j + c] = v < 0 ? 0 : v > 255 ? 255 : v;
         }
     }
     return img;
@@ -3463,6 +3695,7 @@ function enhanceBW(canvas) {
     const win = Math.max(15, (Math.round(Math.max(w, h) / 55) | 1));
     const half = win >> 1;
     const k = 0.22, R = 128;
+    const bin = new Uint8Array(n);
     for (let y = 0; y < h; y++) {
         const y0 = Math.max(0, y - half), y1 = Math.min(h - 1, y + half);
         for (let x = 0; x < w; x++) {
@@ -3475,57 +3708,172 @@ function enhanceBW(canvas) {
             const mean = sum / area;
             const variance = Math.max(0, sum2 / area - mean * mean);
             const T = mean * (1 + k * (Math.sqrt(variance) / R - 1));
-            const v = gray[y * w + x] > T ? 255 : 0;
-            const j = (y * w + x) * 4;
-            d[j] = d[j + 1] = d[j + 2] = v;
-            d[j + 3] = 255;
+            bin[y * w + x] = gray[y * w + x] > T ? 1 : 0;
         }
     }
+
+    // Despeckle : un pixel noir sans voisin noir = bruit (poussière, grain)
+    for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+            const i = y * w + x;
+            if (bin[i]) continue;
+            const blackNeighbors =
+                (1 - bin[i - 1]) + (1 - bin[i + 1]) + (1 - bin[i - w]) + (1 - bin[i + w]) +
+                (1 - bin[i - w - 1]) + (1 - bin[i - w + 1]) + (1 - bin[i + w - 1]) + (1 - bin[i + w + 1]);
+            if (blackNeighbors <= 1) bin[i] = 1;
+        }
+    }
+
+    for (let i = 0, j = 0; i < n; i++, j += 4) {
+        const v = bin[i] ? 255 : 0;
+        d[j] = d[j + 1] = d[j + 2] = v;
+        d[j + 3] = 255;
+    }
     return img;
+}
+
+// ---------- Multi-pages ----------
+function scanRefreshPagesStrip() {
+    const strip = document.getElementById('scan-pages-strip');
+    const thumbs = document.getElementById('scan-pages-thumbs');
+    const count = document.getElementById('scan-pages-count');
+    if (!strip || !thumbs) return;
+    thumbs.innerHTML = '';
+    if (!scanState.pages.length) { strip.style.display = 'none'; return; }
+    strip.style.display = 'block';
+    if (count) count.textContent = scanState.pages.length;
+    scanState.pages.forEach((pg, idx) => {
+        const wrap = document.createElement('div');
+        wrap.className = 'scan-page-thumb';
+        const img = document.createElement('img');
+        img.src = pg.thumb;
+        img.alt = 'Page ' + (idx + 1);
+        const num = document.createElement('span');
+        num.className = 'scan-page-num';
+        num.textContent = idx + 1;
+        const del = document.createElement('button');
+        del.className = 'scan-page-del';
+        del.type = 'button';
+        del.innerHTML = '&#10005;';
+        del.title = 'Supprimer cette page';
+        del.addEventListener('click', () => {
+            scanState.pages.splice(idx, 1);
+            scanRefreshPagesStrip();
+        });
+        wrap.appendChild(img);
+        wrap.appendChild(num);
+        wrap.appendChild(del);
+        thumbs.appendChild(wrap);
+    });
+}
+
+function scanSnapshotCurrentPage() {
+    const c = document.createElement('canvas');
+    c.width = scanResultCanvas.width;
+    c.height = scanResultCanvas.height;
+    c.getContext('2d').drawImage(scanResultCanvas, 0, 0);
+    // Vignette (économise la mémoire d'affichage)
+    const t = document.createElement('canvas');
+    const th = 120, tw = Math.round(th * c.width / c.height);
+    t.width = tw; t.height = th;
+    t.getContext('2d').drawImage(c, 0, 0, tw, th);
+    return { canvas: c, mode: scanState.mode, thumb: t.toDataURL('image/jpeg', 0.7) };
+}
+
+const scanAddPageBtn = document.getElementById('scan-add-page-btn');
+if (scanAddPageBtn) {
+    scanAddPageBtn.addEventListener('click', () => {
+        if (!scanResultCanvas || !scanResultCanvas.width) return;
+        scanState.pages.push(scanSnapshotCurrentPage());
+        scanRefreshPagesStrip();
+        scanShowStep('capture');
+    });
+}
+
+// Toutes les pages du document : pages validées + celle affichée le cas échéant
+function scanCollectPages() {
+    const all = scanState.pages.slice();
+    const resultVisible = scanResultStep && scanResultStep.style.display !== 'none';
+    if (resultVisible && scanResultCanvas && scanResultCanvas.width) {
+        all.push(scanSnapshotCurrentPage());
+    }
+    return all;
+}
+
+async function scanBuildPdfBytes(pages) {
+    const { PDFDocument } = PDFLib;
+    const pdfDoc = await PDFDocument.create();
+    const scalePt = 72 / 200; // ~200 DPI
+    for (const pg of pages) {
+        const c = pg.canvas;
+        let image;
+        if (pg.mode === 'bw') {
+            const bytes = await fetch(c.toDataURL('image/png')).then(r => r.arrayBuffer());
+            image = await pdfDoc.embedPng(bytes);
+        } else {
+            const bytes = await fetch(c.toDataURL('image/jpeg', 0.92)).then(r => r.arrayBuffer());
+            image = await pdfDoc.embedJpg(bytes);
+        }
+        const pw = c.width * scalePt, ph = c.height * scalePt;
+        const page = pdfDoc.addPage([pw, ph]);
+        page.drawImage(image, { x: 0, y: 0, width: pw, height: ph });
+    }
+    return pdfDoc.save();
+}
+
+function scanResetAll() {
+    scanState.pages = [];
+    scanState.warped = null;
+    scanRefreshPagesStrip();
+    scanShowStep('capture');
 }
 
 // ---------- Sortie ----------
 const scanUseBtn = document.getElementById('scan-use-btn');
 if (scanUseBtn) {
-    scanUseBtn.addEventListener('click', () => {
-        if (!scanResultCanvas || !scanResultCanvas.width) return;
-        scanResultCanvas.toBlob((blob) => {
-            if (!blob) return;
-            const file = new File([blob], `scan_${Date.now()}.png`, { type: 'image/png' });
+    scanUseBtn.addEventListener('click', async () => {
+        const pages = scanCollectPages();
+        if (!pages.length) return;
+        try {
+            showLoader();
+            let file;
+            if (pages.length === 1) {
+                const blob = await new Promise(res => pages[0].canvas.toBlob(res, 'image/png'));
+                file = new File([blob], `scan_${Date.now()}.png`, { type: 'image/png' });
+            } else {
+                const bytes = await scanBuildPdfBytes(pages);
+                file = new File([new Blob([bytes], { type: 'application/pdf' })], `scan_${Date.now()}.pdf`, { type: 'application/pdf' });
+            }
+            scanResetAll();
             setView('signature');
-            handleFileUpload({ target: { files: [file] } });
-        }, 'image/png');
+            await handleFileUpload({ target: { files: [file] } });
+        } catch (err) {
+            console.error('Scanner -> document:', err);
+            alert('Erreur: ' + err.message);
+        } finally {
+            hideLoader();
+        }
     });
 }
 
 const scanPdfBtn = document.getElementById('scan-pdf-btn');
 if (scanPdfBtn) {
     scanPdfBtn.addEventListener('click', async () => {
-        if (!scanResultCanvas || !scanResultCanvas.width) return;
+        const pages = scanCollectPages();
+        if (!pages.length) return;
+        // Choix du nom du fichier avant l'enregistrement
+        const name = prompt('Nom du fichier PDF:', 'document_scanne');
+        if (name === null) return;
+        const clean = (name.trim() || 'document_scanne');
+        const fileName = clean.endsWith('.pdf') ? clean : clean + '.pdf';
         try {
             showLoader();
-            const { PDFDocument } = PDFLib;
-            const pdfDoc = await PDFDocument.create();
-            // ~200 DPI : conversion px -> points PDF
-            const scalePt = 72 / 200;
-            const pw = scanResultCanvas.width * scalePt;
-            const ph = scanResultCanvas.height * scalePt;
-            let image;
-            if (scanState.mode === 'bw') {
-                const bytes = await fetch(scanResultCanvas.toDataURL('image/png')).then(r => r.arrayBuffer());
-                image = await pdfDoc.embedPng(bytes);
-            } else {
-                const bytes = await fetch(scanResultCanvas.toDataURL('image/jpeg', 0.92)).then(r => r.arrayBuffer());
-                image = await pdfDoc.embedJpg(bytes);
-            }
-            const page = pdfDoc.addPage([pw, ph]);
-            page.drawImage(image, { x: 0, y: 0, width: pw, height: ph });
-            const bytes = await pdfDoc.save();
+            const bytes = await scanBuildPdfBytes(pages);
             const blob = new Blob([bytes], { type: 'application/pdf' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = 'document_scanne.pdf';
+            a.download = fileName;
             a.click();
             URL.revokeObjectURL(url);
         } catch (err) {

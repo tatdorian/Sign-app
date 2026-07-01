@@ -20,8 +20,9 @@ en haut de l'écran :
 
 Un éditeur type Word, par calque, aplati dans le PDF à l'enregistrement :
 
-- **Modifier texte** : cliquez sur un texte existant du PDF pour le retaper —
-  l'original est masqué et remplacé à l'export (best-effort, voir remarque)
+- **Modifier texte** : toutes les lignes de texte du PDF sont surlignées et
+  cliquables — cliquez sur une ligne pour la réécrire (couleur d'origine
+  reprise automatiquement). L'original est masqué et remplacé à l'export.
 - **Texte** : ajoutez des zones de texte éditables (couleur, taille, gras)
 - **Image** : insérez des images, déplaçables et redimensionnables
 - **Forme** : ajoutez des rectangles
@@ -41,20 +42,25 @@ Transformez une photo de document en scan « qualité imprimante », 100 % dans
 le navigateur (aucune image n'est envoyée sur un serveur) :
 
 - **Capture** : appareil photo (mobile) ou image existante
-- **Détection automatique des coins** : réduction de bruit (flou gaussien),
-  contours de Canny, composantes connexes, enveloppe convexe réduite à
-  4 sommets — avec repli sur un cadre ajustable si la détection échoue
+- **Détection automatique des coins** (deux stratégies combinées) : contours
+  de Canny multi-seuils + segmentation d'Otsu de la région claire, enveloppe
+  convexe réduite à 4 sommets, sélection par score (aire × adhérence aux
+  gradients, angles plausibles) — repli sur un cadre ajustable si besoin
 - **Ajustement manuel** : 4 poignées draggables avec loupe de précision
 - **Redressement** : homographie (transformation projective) calculée à partir
   des 4 coins, interpolation bilinéaire, ratio A4 auto-détecté
-- **Filtres « scanner »** :
-  - *Noir & blanc* : binarisation adaptative de Sauvola (images intégrales) —
-    élimine les ombres localement, fond blanc pur, encre noire profonde
-  - *Couleur* : normalisation d'illumination (division par le fond estimé) —
-    supprime les ombres en conservant les couleurs
-  - *Original* : redressement seul
+- **Filtres « scanner » anti-ombre / anti-reflet** :
+  - *Noir & blanc* : accentuation + binarisation adaptative de Sauvola
+    (images intégrales) + despeckle — élimine ombres et reflets localement,
+    fond blanc pur, encre noire profonde
+  - *Couleur* : normalisation d'illumination (division par le fond estimé,
+    double filtre max) + contraste + accentuation — supprime ombres et
+    reflets en conservant les couleurs
+  - *Photo* : redressement seul, sans filtre
+- **Multi-pages** : ajoutez plusieurs photos au même document (vignettes,
+  suppression page par page) — export en un seul PDF
 - **Sortie** : utiliser le scan directement dans Signature/Éditeur, ou
-  télécharger en PDF
+  télécharger en PDF (nom de fichier au choix)
 
 ## ✨ Autres caractéristiques
 

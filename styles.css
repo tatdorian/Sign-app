@@ -513,6 +513,50 @@ header { margin-bottom: 24px; }
     border: 1px solid var(--separator);
     line-height: 0;
 }
+
+/* Pages scannées (document multi-pages) */
+.scan-pages-strip {
+    margin-top: 14px;
+    padding: 12px;
+    background: var(--bg-subtle);
+    border-radius: var(--r);
+}
+.scan-pages-title { font-size: .84em; color: var(--label-2); margin-bottom: 8px; }
+.scan-pages-title strong { color: var(--blue); }
+.scan-pages-thumbs {
+    display: flex; gap: 10px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+}
+.scan-page-thumb {
+    position: relative;
+    flex-shrink: 0;
+    border-radius: var(--r-sm);
+    overflow: visible;
+}
+.scan-page-thumb img {
+    display: block;
+    height: 86px; width: auto;
+    border-radius: var(--r-sm);
+    border: 1px solid var(--separator-strong);
+    background: #fff;
+}
+.scan-page-thumb .scan-page-num {
+    position: absolute; bottom: 4px; left: 4px;
+    background: rgba(0,0,0,.6); color: #fff;
+    font-size: .62em; font-weight: 600;
+    padding: 2px 6px; border-radius: 8px;
+    line-height: 1;
+}
+.scan-page-thumb .scan-page-del {
+    position: absolute; top: -7px; right: -7px;
+    width: 20px; height: 20px; border-radius: 50%;
+    background: var(--red); color: #fff;
+    border: 2px solid var(--bg-card);
+    font-size: 11px; line-height: 1;
+    cursor: pointer; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+}
 #scan-result-canvas { display: block; width: 100%; height: auto; }
 .scan-processing {
     position: absolute; inset: 0;
@@ -1171,6 +1215,24 @@ input[type="range"]::-moz-range-thumb {
 .editor-el-existing {
     outline: 1px dashed rgba(124,58,237,.4);
     outline-offset: 0;
+}
+
+/* Cibles cliquables sur les lignes de texte du PDF (mode Modifier texte) */
+.edit-text-target {
+    position: absolute;
+    pointer-events: auto;
+    cursor: text;
+    border: 1.5px dashed rgba(124,58,237,.55);
+    border-radius: 3px;
+    background: rgba(124,58,237,.07);
+    box-sizing: border-box;
+    transition: background .12s ease, border-color .12s ease;
+    z-index: 9;
+}
+.edit-text-target:hover {
+    background: rgba(124,58,237,.18);
+    border-color: var(--blue);
+    border-style: solid;
 }
 
 .editor-el {

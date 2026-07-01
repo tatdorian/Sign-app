@@ -271,7 +271,7 @@
                         </button>
                     </div>
                     <button class="editor-clear" id="editor-clear">Tout effacer</button>
-                    <p class="editor-hint">Choisissez un outil puis cliquez sur le document. « Modifier texte » : cliquez sur un texte du PDF pour le retaper (fonctionne mieux sur fond uni). Double-clic pour rééditer un texte ajouté.</p>
+                    <p class="editor-hint">« Modifier texte » : les textes du PDF sont surlignés — cliquez sur une ligne pour la réécrire. Les autres outils s'appliquent d'un clic sur le document. Double-clic pour rééditer un texte ajouté.</p>
                     <input type="file" id="editor-image-input" accept="image/*" hidden>
                 </div>
 
@@ -362,11 +362,11 @@
 
                 <!-- Étape 3 : résultat + filtres -->
                 <div id="scan-result" style="display:none">
-                    <p class="scan-step-label"><strong>2.</strong> Choisissez le rendu</p>
+                    <p class="scan-step-label"><strong>2.</strong> Choisissez le rendu — les filtres suppriment ombres et reflets</p>
                     <div class="scan-modes">
                         <button class="scan-mode-btn active" data-scan-mode="bw">Noir &amp; blanc</button>
                         <button class="scan-mode-btn" data-scan-mode="color">Couleur</button>
-                        <button class="scan-mode-btn" data-scan-mode="original">Original</button>
+                        <button class="scan-mode-btn" data-scan-mode="original">Photo (sans filtre)</button>
                     </div>
                     <div class="scan-result-wrap">
                         <canvas id="scan-result-canvas"></canvas>
@@ -376,9 +376,21 @@
                     </div>
                     <div class="scan-actions">
                         <button class="btn btn-ghost" id="scan-back-btn">Ajuster les coins</button>
+                        <button class="btn btn-secondary" id="scan-add-page-btn">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+                            Ajouter une page
+                        </button>
+                    </div>
+                    <div class="scan-actions">
                         <button class="btn btn-success" id="scan-use-btn">Utiliser ce document</button>
                         <button class="btn btn-primary" id="scan-pdf-btn">Télécharger en PDF</button>
                     </div>
+                </div>
+
+                <!-- Pages déjà scannées (document multi-pages) -->
+                <div id="scan-pages-strip" class="scan-pages-strip" style="display:none">
+                    <p class="scan-pages-title">Pages du document&nbsp;: <strong id="scan-pages-count">0</strong></p>
+                    <div class="scan-pages-thumbs" id="scan-pages-thumbs"></div>
                 </div>
             </section>
 
