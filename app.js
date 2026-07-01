@@ -272,7 +272,7 @@ async function handleFileUpload(e) {
         // Vider le contenu precedent (garder les overlays)
         const children = Array.from(documentPreview.children);
         children.forEach(child => {
-            if (child.id !== 'signature-overlay' && child.id !== 'paraphe-overlay') {
+            if (child.id !== 'signature-overlay' && child.id !== 'paraphe-overlay' && child.id !== 'editor-overlay') {
                 child.remove();
             }
         });
@@ -285,10 +285,8 @@ async function handleFileUpload(e) {
             await loadImage(file);
         }
 
-        // Afficher les sections
-        signatureSection.style.display = 'block';
-        parapheSection.style.display = 'block';
-        actionsSection.style.display = 'block';
+        // Document chargé : appliquer la visibilité selon le service actif
+        documentLoaded = true;
 
         const sizeControl = document.getElementById('signature-size-control');
         if (sizeControl) sizeControl.style.display = 'block';
@@ -299,6 +297,8 @@ async function handleFileUpload(e) {
         // Afficher toolbar
         const toolbar = document.getElementById('doc-toolbar');
         if (toolbar) toolbar.style.display = 'flex';
+
+        applyView();
 
         // Afficher page selector si multi-pages
 
@@ -353,7 +353,7 @@ if (newDocBtn) {
         // Vider le preview
         const children = Array.from(documentPreview.children);
         children.forEach(child => {
-            if (child.id !== 'signature-overlay' && child.id !== 'paraphe-overlay') {
+            if (child.id !== 'signature-overlay' && child.id !== 'paraphe-overlay' && child.id !== 'editor-overlay') {
                 child.remove();
             }
         });
@@ -370,6 +370,11 @@ if (newDocBtn) {
         dropZone.style.display = '';
         fileInput.value = '';
         fileInfo.textContent = 'PDF ou Image (JPG, PNG)';
+
+        // Réinitialiser l'éditeur (les éléments sont propres au document)
+        documentLoaded = false;
+        if (typeof resetEditor === 'function') resetEditor();
+        if (typeof applyView === 'function') applyView();
 
         // Garder les sections signature/paraphe/actions visibles si signature existe
         if (!state.signatureData) {
@@ -407,7 +412,7 @@ async function loadPDF(file) {
     // Vider contenu precedent
     const children = Array.from(documentPreview.children);
     children.forEach(child => {
-        if (child.id !== 'signature-overlay' && child.id !== 'paraphe-overlay') {
+        if (child.id !== 'signature-overlay' && child.id !== 'paraphe-overlay' && child.id !== 'editor-overlay') {
             child.remove();
         }
     });
@@ -489,6 +494,8 @@ async function loadPDF(file) {
             parapheOverlay.style.height = `${totalHeight}px`;
             parapheOverlay.style.pointerEvents = 'none';
         }
+
+        if (typeof syncEditorOverlayHeight === 'function') syncEditorOverlayHeight();
     });
 
     state.totalPages = numPages;
@@ -1451,15 +1458,19 @@ function getSignatureTargetPages() {
 downloadBtn.addEventListener('click', generateAndDownloadPDF);
 
 async function generateAndDownloadPDF() {
-    if (!state.signatureData) {
-        alert('Veuillez creer une signature d\'abord!');
+    const hasEditorContent = document.querySelectorAll('#editor-overlay .editor-el').length > 0;
+    if (!state.signatureData && !state.parapheData && !hasEditorContent) {
+        alert(currentView === 'editor'
+            ? 'Ajoutez au moins un élément (texte, image, forme…) avant de télécharger.'
+            : 'Veuillez creer une signature d\'abord!');
         return;
     }
 
-    const fileName = prompt('Nom du fichier PDF:', 'document_signe');
+    const defaultName = currentView === 'editor' ? 'document_edite' : 'document_signe';
+    const fileName = prompt('Nom du fichier PDF:', defaultName);
     if (fileName === null) return;
 
-    const cleanFileName = fileName.trim() || 'document_signe';
+    const cleanFileName = fileName.trim() || defaultName;
     const finalFileName = cleanFileName.endsWith('.pdf') ? cleanFileName : `${cleanFileName}.pdf`;
 
     try {
@@ -1514,7 +1525,8 @@ async function createSignedPDF() {
 
     const pages = pdfDoc.getPages();
 
-    // Embed signature
+    // Embed signature (optionnelle : le document peut être seulement édité)
+    if (state.signatureData) {
     const signatureImageBytes = await fetch(state.signatureData).then(res => res.arrayBuffer());
     const signatureImage = await pdfDoc.embedPng(signatureImageBytes);
 
@@ -1606,6 +1618,7 @@ async function createSignedPDF() {
             });
         }
     }
+    } // fin if (state.signatureData)
 
     // Ajouter le paraphe sur toutes les pages
     if (state.parapheData) {
@@ -1672,6 +1685,9 @@ async function createSignedPDF() {
         const { width: pw, height: ph } = page.getSize();
         page.drawImage(annotImage, { x: 0, y: 0, width: pw, height: ph });
     }
+
+    // Aplatir les éléments de l'éditeur (texte, images, formes, caches)
+    await embedEditorElements(pdfDoc, pages);
 
     return await pdfDoc.save();
 }
@@ -2071,3 +2087,594 @@ window.addEventListener('DOMContentLoaded', () => {
     updateCanvasCursor(signatureCanvas, state.signatureTool);
     if (parapheCanvas) updateCanvasCursor(parapheCanvas, state.parapheTool);
 });
+
+// ==============================================
+// SERVICES : NAVBAR (Signature / Éditeur PDF)
+// ==============================================
+let currentView = 'signature';
+let documentLoaded = false;
+
+const navEl = document.querySelector('.app-nav');
+const navTabs = document.querySelectorAll('.nav-tab');
+const editorToolbar = document.getElementById('editor-toolbar');
+const editorOverlay = document.getElementById('editor-overlay');
+const downloadBtnLabel = document.getElementById('download-btn-label');
+
+function applyView() {
+    if (navEl) navEl.dataset.view = currentView;
+    navTabs.forEach(t => {
+        const on = t.dataset.view === currentView;
+        t.classList.toggle('active', on);
+        t.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+
+    const container = document.querySelector('.container');
+    if (container) {
+        container.classList.toggle('view-editor', currentView === 'editor');
+        container.classList.toggle('view-signature', currentView === 'signature');
+    }
+
+    const isEditor = currentView === 'editor';
+
+    // Sections propres au service Signature
+    if (signatureSection) signatureSection.style.display = (!isEditor && documentLoaded) ? 'block' : 'none';
+    if (parapheSection)   parapheSection.style.display   = (!isEditor && documentLoaded) ? 'block' : 'none';
+    if (actionsSection)   actionsSection.style.display   = documentLoaded ? 'block' : 'none';
+
+    const sizeControl = document.getElementById('signature-size-control');
+    const placementControl = document.getElementById('sig-placement-control');
+    if (sizeControl)      sizeControl.style.display      = (!isEditor && documentLoaded) ? 'block' : 'none';
+    if (placementControl) placementControl.style.display = (!isEditor && documentLoaded) ? 'flex'  : 'none';
+
+    // Barre + overlay de l'éditeur
+    if (editorOverlay) editorOverlay.style.display = documentLoaded ? 'block' : 'none';
+
+    if (isEditor) {
+        if (typeof setAnnotationMode === 'function') setAnnotationMode(false);
+        if (editorToolbar) editorToolbar.style.display = documentLoaded ? 'flex' : 'none';
+        enableEditorMode(documentLoaded);
+    } else {
+        if (editorToolbar) editorToolbar.style.display = 'none';
+        enableEditorMode(false);
+    }
+
+    if (downloadBtnLabel) {
+        downloadBtnLabel.textContent = isEditor ? 'Télécharger le PDF' : 'Télécharger le document signé';
+    }
+}
+
+function setView(view) {
+    if (view !== 'signature' && view !== 'editor') return;
+    currentView = view;
+    applyView();
+    // Repositionner l'overlay si on arrive sur l'éditeur
+    if (view === 'editor') syncEditorOverlayHeight();
+}
+
+navTabs.forEach(tab => {
+    tab.addEventListener('click', () => setView(tab.dataset.view));
+});
+
+// ==============================================
+// ÉDITEUR : état & outils
+// ==============================================
+let editorMode = false;
+let editorTool = 'select';           // select | text | image | rect | whiteout
+let editorColor = '#111111';
+let editorFontSize = 18;
+let editorBold = false;
+let editorSelected = null;
+
+const edFormat = document.getElementById('editor-format');
+const edColorsWrap = document.getElementById('ed-colors');
+const edSizeWrap = document.getElementById('ed-size-wrap');
+const edFontSizeInput = document.getElementById('ed-font-size');
+const edBoldBtn = document.getElementById('ed-bold');
+const edDeleteBtn = document.getElementById('ed-delete');
+const edImageInput = document.getElementById('editor-image-input');
+
+function enableEditorMode(on) {
+    editorMode = on;
+    if (documentPreview) documentPreview.classList.toggle('editor-mode', on);
+    if (!on) {
+        if (documentPreview) documentPreview.classList.remove('editor-add-mode');
+        deselectEditor();
+    } else {
+        syncEditorOverlayHeight();
+        refreshFormatBar();
+    }
+}
+
+function syncEditorOverlayHeight() {
+    if (!editorOverlay) return;
+    const pc = document.getElementById('pdf-pages-container');
+    let h = 0;
+    if (pc) h = pc.scrollHeight || pc.offsetHeight;
+    else {
+        const el = documentPreview.querySelector('canvas, img');
+        h = el ? el.getBoundingClientRect().height : documentPreview.scrollHeight;
+    }
+    editorOverlay.style.height = `${h}px`;
+}
+
+function setEditorTool(tool) {
+    editorTool = tool;
+    document.querySelectorAll('.ed-tool').forEach(b => b.classList.toggle('active', b.dataset.edTool === tool));
+    if (documentPreview) documentPreview.classList.toggle('editor-add-mode', tool !== 'select');
+    if (tool === 'image') {
+        if (edImageInput) edImageInput.click();
+        // rester en 'select' après ouverture du sélecteur
+        setEditorTool('select');
+    }
+}
+
+document.querySelectorAll('.ed-tool').forEach(btn => {
+    btn.addEventListener('click', () => setEditorTool(btn.dataset.edTool));
+});
+
+// ==============================================
+// ÉDITEUR : couleurs helpers
+// ==============================================
+function parseColor(str) {
+    if (!str) return { r: 0, g: 0, b: 0 };
+    str = ('' + str).trim();
+    if (str[0] === '#') {
+        let h = str.slice(1);
+        if (h.length === 3) h = h.split('').map(c => c + c).join('');
+        const n = parseInt(h, 16);
+        return { r: ((n >> 16) & 255) / 255, g: ((n >> 8) & 255) / 255, b: (n & 255) / 255 };
+    }
+    const m = str.match(/rgba?\(([^)]+)\)/i);
+    if (m) {
+        const p = m[1].split(',').map(s => parseFloat(s));
+        return { r: (p[0] || 0) / 255, g: (p[1] || 0) / 255, b: (p[2] || 0) / 255 };
+    }
+    return { r: 0, g: 0, b: 0 };
+}
+function hexToRgba(hex, a) {
+    const c = parseColor(hex);
+    return `rgba(${Math.round(c.r * 255)},${Math.round(c.g * 255)},${Math.round(c.b * 255)},${a})`;
+}
+function sanitizeWinAnsi(s) {
+    // pdf-lib StandardFonts n'encode que WinAnsi : retirer les caractères hors Latin-1
+    return ('' + s).replace(/[^\x00-\xFF]/g, '');
+}
+
+// ==============================================
+// ÉDITEUR : création / interaction des éléments
+// ==============================================
+function addEditorElement(type, x, y, opts) {
+    opts = opts || {};
+    if (!editorOverlay) return null;
+
+    const el = document.createElement('div');
+    el.className = 'editor-el editor-el-' + type;
+    el.dataset.type = type;
+
+    let w = opts.w, h = opts.h;
+
+    if (type === 'text') {
+        el.classList.add('editor-el-text');
+        el.style.color = editorColor === '#FFFFFF' ? '#111111' : editorColor;
+        el.dataset.color = editorColor === '#FFFFFF' ? '#111111' : editorColor;
+        el.style.fontSize = editorFontSize + 'px';
+        el.style.fontWeight = editorBold ? '700' : '400';
+        const c = document.createElement('div');
+        c.className = 'editor-text-content';
+        c.setAttribute('contenteditable', 'true');
+        c.textContent = opts.text || 'Votre texte';
+        el.appendChild(c);
+        w = w || 170;
+    } else if (type === 'image') {
+        el.classList.add('editor-el-image');
+        const img = document.createElement('img');
+        img.src = opts.src;
+        img.alt = 'image';
+        el.appendChild(img);
+        const aspect = opts.aspect || 1.5;
+        el.dataset.aspect = aspect;
+        w = w || 200;
+        h = h || Math.round(w / aspect);
+    } else if (type === 'rect') {
+        el.dataset.color = editorColor === '#FFFFFF' ? '#7C3AED' : editorColor;
+        el.style.borderColor = el.dataset.color;
+        el.style.background = hexToRgba(el.dataset.color, 0.18);
+        w = w || 170; h = h || 90;
+    } else if (type === 'whiteout') {
+        el.dataset.color = '#FFFFFF';
+        w = w || 170; h = h || 42;
+    }
+
+    const boxH = h || 34;
+    el.style.left = Math.max(0, x - w / 2) + 'px';
+    el.style.top = Math.max(0, y - boxH / 2) + 'px';
+    el.style.width = w + 'px';
+    if (type !== 'text' && h) el.style.height = h + 'px';
+
+    // Poignées
+    const remove = document.createElement('button');
+    remove.className = 'ed-remove';
+    remove.type = 'button';
+    remove.innerHTML = '&#10005;';
+    remove.addEventListener('pointerdown', ev => ev.stopPropagation());
+    remove.addEventListener('click', ev => { ev.stopPropagation(); removeEditorEl(el); });
+
+    const resize = document.createElement('span');
+    resize.className = 'ed-resize';
+    attachResize(resize, el);
+
+    el.appendChild(remove);
+    el.appendChild(resize);
+    attachElementDrag(el);
+    editorOverlay.appendChild(el);
+    selectEditor(el);
+    return el;
+}
+
+function removeEditorEl(el) {
+    if (!el) return;
+    if (editorSelected === el) editorSelected = null;
+    el.remove();
+    refreshFormatBar();
+}
+
+function selectEditor(el) {
+    deselectEditor();
+    editorSelected = el;
+    el.classList.add('selected');
+    refreshFormatBar();
+}
+
+function deselectEditor() {
+    if (editorOverlay) editorOverlay.querySelectorAll('.editor-el.selected').forEach(e => e.classList.remove('selected'));
+    editorSelected = null;
+    refreshFormatBar();
+}
+
+// Barre de format toujours visible en mode éditeur (évite les sauts de mise en page).
+// Sans sélection : règle les valeurs par défaut du prochain élément.
+// Avec sélection : édite l'élément sélectionné.
+function refreshFormatBar() {
+    if (!edFormat) return;
+    if (!editorMode) { edFormat.style.display = 'none'; return; }
+    edFormat.style.display = 'flex';
+
+    const el = editorSelected;
+    const t = el ? el.dataset.type : null;
+    // Couleur / taille / gras : pertinents pour texte & formes (et comme réglages par défaut)
+    const showColor = !el || t === 'text' || t === 'rect';
+    const showSize  = !el || t === 'text';
+    const showBold  = !el || t === 'text';
+    if (edColorsWrap) edColorsWrap.style.display = showColor ? 'flex' : 'none';
+    if (edSizeWrap)   edSizeWrap.style.display   = showSize ? 'flex' : 'none';
+    if (edBoldBtn)    edBoldBtn.style.display     = showBold ? 'inline-flex' : 'none';
+    if (edDeleteBtn)  edDeleteBtn.style.display   = el ? 'inline-flex' : 'none';
+
+    if (el && t === 'text') {
+        if (edFontSizeInput) edFontSizeInput.value = parseInt(el.style.fontSize) || editorFontSize;
+        if (edBoldBtn) edBoldBtn.classList.toggle('active', el.style.fontWeight === '700');
+    } else {
+        if (edFontSizeInput) edFontSizeInput.value = editorFontSize;
+        if (edBoldBtn) edBoldBtn.classList.toggle('active', editorBold);
+    }
+    const cur = (el ? (el.dataset.color || '#111111') : editorColor).toLowerCase();
+    document.querySelectorAll('.ed-color-swatch').forEach(s =>
+        s.classList.toggle('active', (s.dataset.edColor || '').toLowerCase() === cur));
+}
+
+function attachElementDrag(el) {
+    el.addEventListener('pointerdown', (e) => {
+        if (!editorMode) return;
+        if (e.target.closest('.ed-resize') || e.target.closest('.ed-remove')) return;
+        if (el.classList.contains('editing')) return;      // édition texte en cours
+        if (editorTool !== 'select') return;               // en mode ajout, ne pas déplacer
+        e.preventDefault();
+        selectEditor(el);
+        const startX = e.clientX, startY = e.clientY;
+        const origL = parseFloat(el.style.left) || 0;
+        const origT = parseFloat(el.style.top) || 0;
+        function move(ev) {
+            const dx = ev.clientX - startX, dy = ev.clientY - startY;
+            const maxL = (editorOverlay.clientWidth || 9999) - el.offsetWidth;
+            const maxT = (editorOverlay.clientHeight || 99999) - el.offsetHeight;
+            el.style.left = Math.max(0, Math.min(origL + dx, maxL)) + 'px';
+            el.style.top = Math.max(0, Math.min(origT + dy, maxT)) + 'px';
+        }
+        function up() {
+            window.removeEventListener('pointermove', move);
+            window.removeEventListener('pointerup', up);
+        }
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', up);
+    });
+
+    if (el.dataset.type === 'text') {
+        el.addEventListener('dblclick', () => startEditingText(el));
+    }
+}
+
+function attachResize(handle, el) {
+    handle.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        selectEditor(el);
+        const startX = e.clientX, startY = e.clientY;
+        const startW = el.offsetWidth, startH = el.offsetHeight;
+        const type = el.dataset.type;
+        const aspect = parseFloat(el.dataset.aspect) || (startW / Math.max(1, startH));
+        function move(ev) {
+            let w = Math.max(28, startW + (ev.clientX - startX));
+            if (type === 'image') {
+                el.style.width = w + 'px';
+                el.style.height = Math.max(20, Math.round(w / aspect)) + 'px';
+            } else if (type === 'text') {
+                el.style.width = w + 'px';  // hauteur auto selon le contenu
+            } else {
+                let h = Math.max(16, startH + (ev.clientY - startY));
+                el.style.width = w + 'px';
+                el.style.height = h + 'px';
+            }
+        }
+        function up() {
+            window.removeEventListener('pointermove', move);
+            window.removeEventListener('pointerup', up);
+        }
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', up);
+    });
+}
+
+function startEditingText(el) {
+    if (!el || el.dataset.type !== 'text') return;
+    el.classList.add('editing');
+    selectEditor(el);
+    const c = el.querySelector('.editor-text-content');
+    if (!c) return;
+    setTimeout(() => {
+        c.focus();
+        const r = document.createRange();
+        r.selectNodeContents(c);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
+    }, 0);
+    const onBlur = () => {
+        el.classList.remove('editing');
+        if (!c.textContent.trim()) removeEditorEl(el);
+        c.removeEventListener('blur', onBlur);
+    };
+    c.addEventListener('blur', onBlur);
+}
+
+// Clic sur le document en mode ajout / désélection
+if (documentPreview) {
+    documentPreview.addEventListener('pointerdown', (e) => {
+        if (!editorMode) return;
+        if (e.target.closest('.editor-el')) return;   // interaction avec un élément existant
+        if (editorTool === 'select') { deselectEditor(); return; }
+
+        const rect = documentPreview.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        if (editorTool === 'text') {
+            const el = addEditorElement('text', x, y);
+            startEditingText(el);
+        } else if (editorTool === 'rect') {
+            addEditorElement('rect', x, y);
+        } else if (editorTool === 'whiteout') {
+            addEditorElement('whiteout', x, y);
+        }
+        setEditorTool('select');
+    });
+}
+
+// Ajout d'image
+if (edImageInput) {
+    edImageInput.addEventListener('change', () => {
+        const file = edImageInput.files && edImageInput.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+            const tmp = new Image();
+            tmp.onload = () => {
+                // Convertir en PNG pour un embed fiable dans le PDF
+                const cv = document.createElement('canvas');
+                cv.width = tmp.naturalWidth; cv.height = tmp.naturalHeight;
+                cv.getContext('2d').drawImage(tmp, 0, 0);
+                let pngSrc;
+                try { pngSrc = cv.toDataURL('image/png'); } catch (err) { pngSrc = reader.result; }
+                const aspect = tmp.naturalWidth / Math.max(1, tmp.naturalHeight);
+                // Placer au centre visible du document
+                const rect = documentPreview.getBoundingClientRect();
+                const x = Math.max(60, (rect.width || 300) / 2);
+                const y = Math.max(60, window.scrollY - rect.top + 160);
+                addEditorElement('image', x, y, { src: pngSrc, aspect: aspect, w: 200 });
+            };
+            tmp.src = reader.result;
+        };
+        reader.readAsDataURL(file);
+        edImageInput.value = '';
+    });
+}
+
+// Barre de format (couleur / taille / gras / supprimer)
+document.querySelectorAll('.ed-color-swatch').forEach(sw => {
+    sw.addEventListener('click', () => {
+        editorColor = sw.dataset.edColor;
+        document.querySelectorAll('.ed-color-swatch').forEach(s => s.classList.remove('active'));
+        sw.classList.add('active');
+        if (editorSelected) {
+            const t = editorSelected.dataset.type;
+            if (t === 'text') {
+                editorSelected.style.color = editorColor;
+                editorSelected.dataset.color = editorColor;
+            } else if (t === 'rect') {
+                editorSelected.dataset.color = editorColor;
+                editorSelected.style.borderColor = editorColor;
+                editorSelected.style.background = hexToRgba(editorColor, 0.18);
+            }
+        }
+    });
+});
+
+if (edFontSizeInput) {
+    edFontSizeInput.addEventListener('input', () => {
+        editorFontSize = parseInt(edFontSizeInput.value) || 18;
+        if (editorSelected && editorSelected.dataset.type === 'text') {
+            editorSelected.style.fontSize = editorFontSize + 'px';
+        }
+    });
+}
+
+if (edBoldBtn) {
+    edBoldBtn.addEventListener('click', () => {
+        if (editorSelected && editorSelected.dataset.type === 'text') {
+            const bold = editorSelected.style.fontWeight === '700';
+            editorSelected.style.fontWeight = bold ? '400' : '700';
+            editorBold = !bold;
+            edBoldBtn.classList.toggle('active', !bold);
+        } else {
+            editorBold = !editorBold;
+            edBoldBtn.classList.toggle('active', editorBold);
+        }
+    });
+}
+
+if (edDeleteBtn) {
+    edDeleteBtn.addEventListener('click', () => { if (editorSelected) removeEditorEl(editorSelected); });
+}
+
+const editorClearBtn = document.getElementById('editor-clear');
+if (editorClearBtn) {
+    editorClearBtn.addEventListener('click', () => {
+        if (!editorOverlay) return;
+        if (!editorOverlay.querySelector('.editor-el')) return;
+        if (confirm('Supprimer tous les éléments ajoutés ?')) {
+            editorOverlay.querySelectorAll('.editor-el').forEach(e => e.remove());
+            deselectEditor();
+        }
+    });
+}
+
+// Supprimer via clavier
+document.addEventListener('keydown', (e) => {
+    if (!editorMode || !editorSelected) return;
+    if (editorSelected.classList.contains('editing')) return;
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        removeEditorEl(editorSelected);
+    }
+});
+
+function resetEditor() {
+    if (editorOverlay) editorOverlay.querySelectorAll('.editor-el').forEach(e => e.remove());
+    deselectEditor();
+    setEditorTool('select');
+}
+
+window.addEventListener('resize', () => { if (documentLoaded) syncEditorOverlayHeight(); });
+
+// ==============================================
+// ÉDITEUR : aplatissement dans le PDF exporté
+// ==============================================
+async function embedDataUrlImage(pdfDoc, dataUrl) {
+    const bytes = await fetch(dataUrl).then(r => r.arrayBuffer());
+    if (/^data:image\/png/i.test(dataUrl)) return pdfDoc.embedPng(bytes);
+    return pdfDoc.embedJpg(bytes);
+}
+
+async function embedEditorElements(pdfDoc, pages) {
+    if (!editorOverlay) return;
+    const els = Array.from(editorOverlay.querySelectorAll('.editor-el'));
+    if (!els.length) return;
+
+    const { rgb, StandardFonts } = PDFLib;
+    let helv = null, helvBold = null;
+
+    const pagesContainer = document.getElementById('pdf-pages-container');
+    const containers = pagesContainer ? Array.from(pagesContainer.querySelectorAll('.pdf-page-container')) : null;
+    const singleEl = !containers ? documentPreview.querySelector('canvas, img') : null;
+
+    for (const el of els) {
+        const elRect = el.getBoundingClientRect();
+        const centerY = elRect.top + elRect.height / 2;
+
+        let pageNum = 1, canvas = null;
+        if (containers && containers.length) {
+            for (const c of containers) {
+                const pr = c.getBoundingClientRect();
+                if (centerY >= pr.top && centerY <= pr.bottom) {
+                    pageNum = parseInt(c.dataset.pageNumber);
+                    canvas = c.querySelector('.pdf-page-canvas');
+                    break;
+                }
+            }
+            if (!canvas) { canvas = containers[0].querySelector('.pdf-page-canvas'); pageNum = 1; }
+        } else {
+            canvas = singleEl; pageNum = 1;
+        }
+        if (!canvas || pageNum < 1 || pageNum > pages.length) continue;
+
+        const cr = canvas.getBoundingClientRect();
+        const page = pages[pageNum - 1];
+        const { width: pw, height: ph } = page.getSize();
+        const scaleX = pw / cr.width;
+
+        const fracX = (elRect.left - cr.left) / cr.width;
+        const fracY = (elRect.top - cr.top) / cr.height;
+        const w = (elRect.width / cr.width) * pw;
+        const h = (elRect.height / cr.height) * ph;
+        const x = fracX * pw;
+        const yTop = fracY * ph;
+        const y = ph - yTop - h;
+        const type = el.dataset.type;
+
+        if (type === 'whiteout') {
+            page.drawRectangle({ x, y, width: w, height: h, color: rgb(1, 1, 1) });
+        } else if (type === 'rect') {
+            const c = parseColor(el.dataset.color || '#7C3AED');
+            page.drawRectangle({
+                x, y, width: w, height: h,
+                color: rgb(c.r, c.g, c.b), opacity: 0.15,
+                borderColor: rgb(c.r, c.g, c.b), borderWidth: Math.max(1, 1.5 * scaleX)
+            });
+        } else if (type === 'image') {
+            const img = el.querySelector('img');
+            if (img && img.src) {
+                try {
+                    const im = await embedDataUrlImage(pdfDoc, img.src);
+                    page.drawImage(im, { x, y, width: w, height: h });
+                } catch (err) { console.warn('Export image éditeur:', err); }
+            }
+        } else if (type === 'text') {
+            if (!helv) {
+                helv = await pdfDoc.embedFont(StandardFonts.Helvetica);
+                helvBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+            }
+            const bold = el.style.fontWeight === '700';
+            const font = bold ? helvBold : helv;
+            const sizePt = (parseFloat(el.style.fontSize) || 18) * scaleX;
+            const lineH = sizePt * 1.25;
+            const col = parseColor(el.style.color || '#111111');
+            const padL = 4 * scaleX, padT = 2 * scaleX;
+            const content = el.querySelector('.editor-text-content');
+            const text = (content ? content.innerText : '').replace(/\r/g, '');
+            const lines = text.split('\n');
+            const topBaseline = (ph - yTop) - padT - sizePt * 0.82;
+            for (let i = 0; i < lines.length; i++) {
+                const ln = sanitizeWinAnsi(lines[i]);
+                if (!ln) continue;
+                try {
+                    page.drawText(ln, {
+                        x: x + padL, y: topBaseline - i * lineH,
+                        size: sizePt, font, color: rgb(col.r, col.g, col.b)
+                    });
+                } catch (err) { console.warn('Export texte éditeur:', err); }
+            }
+        }
+    }
+}
+
+// Appliquer le service par défaut au démarrage
+applyView();
