@@ -2434,7 +2434,7 @@ function showEditTextTargets() {
                 e.preventDefault();
                 editedLineKeys.add(key);
                 t.remove();
-                createExistingTextEdit(line, pageNum, canvas, key);
+                createExistingTextEdit(line, pageNum, canvas, key, { x: e.clientX, y: e.clientY });
             });
             editorOverlay.appendChild(t);
         }
@@ -2468,14 +2468,13 @@ function sampleTextColor(canvas, line) {
 
 // Créer la zone éditable par-dessus une ligne existante
 // (l'original est couvert à l'écran et masqué dans le PDF exporté)
-function createExistingTextEdit(line, pageNum, canvas, lineKey) {
+function createExistingTextEdit(line, pageNum, canvas, lineKey, caretPoint) {
     const dpRect = documentPreview.getBoundingClientRect();
     const rect = canvas.getBoundingClientRect();
     const scale = rect.width / canvas.width;
     const left = (rect.left - dpRect.left) + line.cx * scale;
     const top = (rect.top - dpRect.top) + line.cy * scale;
     const fontPx = Math.max(6, line.ch * scale * 0.92);
-    const wpx = Math.max(40, line.cw * scale + 14);
     const color = sampleTextColor(canvas, line);
 
     const el = addEditorElement('text', 0, 0, { text: line.str });
@@ -2497,15 +2496,22 @@ function createExistingTextEdit(line, pageNum, canvas, lineKey) {
     el.dataset.initFontPx = fontPx;
     el.style.left = left + 'px';
     el.style.top = top + 'px';
-    el.style.width = wpx + 'px';
+    // Mise en page intangible : pas de retour à la ligne (le texte s'étend
+    // horizontalement comme dans le PDF), boîte auto-dimensionnée
+    el.style.width = 'auto';
+    el.style.minWidth = Math.max(24, line.cw * scale) + 'px';
+    el.style.whiteSpace = 'pre';
+    el.style.padding = '0';
     el.style.fontSize = fontPx + 'px';
     el.style.color = color;
     el.dataset.color = color;
     el.style.fontWeight = '400';
     el.style.lineHeight = '1.15';
+    const contentEl = el.querySelector('.editor-text-content');
+    if (contentEl) contentEl.style.whiteSpace = 'pre';
     // Couvrir le texte d'origine (fond page supposé uni/blanc — best-effort)
     el.style.background = '#ffffff';
-    startEditingText(el);
+    startEditingText(el, caretPoint);
     refreshFormatBar();
 }
 
@@ -2592,7 +2598,7 @@ function attachElementDrag(el) {
     });
 
     if (el.dataset.type === 'text') {
-        el.addEventListener('dblclick', () => startEditingText(el));
+        el.addEventListener('dblclick', (e) => startEditingText(el, { x: e.clientX, y: e.clientY }));
     }
 }
 
@@ -2627,7 +2633,9 @@ function attachResize(handle, el) {
     });
 }
 
-function startEditingText(el) {
+// caretPoint {x, y} facultatif : place le curseur au point cliqué
+// (sinon : tout sélectionner — utile pour le placeholder d'un texte ajouté)
+function startEditingText(el, caretPoint) {
     if (!el || el.dataset.type !== 'text') return;
     el.classList.add('editing');
     selectEditor(el);
@@ -2649,11 +2657,39 @@ function startEditingText(el) {
 
     setTimeout(() => {
         c.focus();
-        const r = document.createRange();
-        r.selectNodeContents(c);
         const sel = window.getSelection();
         sel.removeAllRanges();
-        sel.addRange(r);
+        let placed = false;
+        if (caretPoint) {
+            // Curseur à l'endroit exact du clic (pas de sélection globale)
+            try {
+                let r = null;
+                if (document.caretRangeFromPoint) {
+                    r = document.caretRangeFromPoint(caretPoint.x, caretPoint.y);
+                } else if (document.caretPositionFromPoint) {
+                    const pos = document.caretPositionFromPoint(caretPoint.x, caretPoint.y);
+                    if (pos) { r = document.createRange(); r.setStart(pos.offsetNode, pos.offset); }
+                }
+                if (r && c.contains(r.startContainer)) {
+                    r.collapse(true);
+                    sel.addRange(r);
+                    placed = true;
+                }
+            } catch (e) { /* fallback ci-dessous */ }
+            if (!placed) {
+                // Repli : curseur en fin de texte
+                const r = document.createRange();
+                r.selectNodeContents(c);
+                r.collapse(false);
+                sel.addRange(r);
+                placed = true;
+            }
+        }
+        if (!placed) {
+            const r = document.createRange();
+            r.selectNodeContents(c);
+            sel.addRange(r);
+        }
     }, 0);
 
     // Entrée = valider pour un texte existant (mono-ligne d'origine),
@@ -3155,6 +3191,27 @@ const scanValidateBtn = document.getElementById('scan-validate-btn');
 const scanBackBtn = document.getElementById('scan-back-btn');
 if (scanRetakeBtn) scanRetakeBtn.addEventListener('click', () => scanShowStep('capture'));
 if (scanBackBtn) scanBackBtn.addEventListener('click', () => scanShowStep('adjust'));
+
+// Pivoter la photo de 90° (sens horaire) — le cadre suit
+const scanRotateBtn = document.getElementById('scan-rotate-btn');
+if (scanRotateBtn) {
+    scanRotateBtn.addEventListener('click', () => {
+        if (!scanState.source) return;
+        const src = scanState.source;
+        const rot = document.createElement('canvas');
+        rot.width = src.height; rot.height = src.width;
+        const rctx = rot.getContext('2d');
+        rctx.translate(rot.width / 2, rot.height / 2);
+        rctx.rotate(Math.PI / 2);
+        rctx.drawImage(src, -src.width / 2, -src.height / 2);
+        scanState.source = rot;
+        // Rotation des coins normalisés : (x, y) -> (1 - y, x)
+        if (scanState.quad) {
+            scanState.quad = orderQuad(scanState.quad.map(p => ({ x: 1 - p.y, y: p.x })));
+        }
+        drawScanPreview();
+    });
+}
 
 if (scanValidateBtn) {
     scanValidateBtn.addEventListener('click', async () => {
@@ -3661,67 +3718,76 @@ function warpDocument(srcCanvas, quadNorm) {
 }
 
 // ---------- Filtres "qualité scanner" ----------
-// Estimation du fond (illumination) : réduction forte + filtre max + flou,
-// puis remise à l'échelle. Divise l'image par ce fond => ombres éliminées.
+// Estimation du fond (illumination) par FERMETURE MORPHOLOGIQUE :
+// dilatation (max) puis érosion (min). Le max seul décale les bords d'ombre
+// et crée un halo sombre le long des contours d'ombre ; le min qui suit
+// restaure ces bords exactement, tout en laissant le texte effacé.
 function estimateBackground(canvas) {
     const w = canvas.width, h = canvas.height;
-    // Carte de fond assez fine pour suivre les ombres nettes (bords d'ombre
-    // portée) tout en restant assez grossière pour effacer le texte
-    const smallW = Math.max(64, Math.min(144, Math.round(w / 16)));
-    const smallH = Math.max(8, Math.round(smallW * h / w));
+    // Carte fine : suit précisément les bords d'ombre nets
+    const smallW = Math.max(96, Math.min(400, Math.round(w / 6)));
+    const smallH = Math.max(12, Math.round(smallW * h / w));
     const sm = document.createElement('canvas');
     sm.width = smallW; sm.height = smallH;
     const smctx = sm.getContext('2d');
     smctx.drawImage(canvas, 0, 0, smallW, smallH);
     const sd = smctx.getImageData(0, 0, smallW, smallH);
-    const px = sd.data;
 
-    // Filtre max 5x5 par canal, appliqué deux fois : le fond est l'enveloppe
-    // claire — les ombres ET le texte disparaissent de l'estimation, les
-    // reflets y restent et seront donc normalisés eux aussi par la division
-    let cur = px;
-    for (let pass = 0; pass < 2; pass++) {
-        const maxed = new Uint8ClampedArray(cur.length);
+    const morph5 = (src, useMax) => {
+        const out = new Uint8ClampedArray(src.length);
         for (let y = 0; y < smallH; y++) {
             for (let x = 0; x < smallW; x++) {
-                let mr = 0, mg = 0, mb = 0;
+                let r = useMax ? 0 : 255, g = r, b = r;
                 for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
                     const yy = Math.min(smallH - 1, Math.max(0, y + dy));
                     const xx = Math.min(smallW - 1, Math.max(0, x + dx));
                     const i = (yy * smallW + xx) * 4;
-                    if (cur[i] > mr) mr = cur[i];
-                    if (cur[i + 1] > mg) mg = cur[i + 1];
-                    if (cur[i + 2] > mb) mb = cur[i + 2];
+                    if (useMax) {
+                        if (src[i] > r) r = src[i];
+                        if (src[i + 1] > g) g = src[i + 1];
+                        if (src[i + 2] > b) b = src[i + 2];
+                    } else {
+                        if (src[i] < r) r = src[i];
+                        if (src[i + 1] < g) g = src[i + 1];
+                        if (src[i + 2] < b) b = src[i + 2];
+                    }
                 }
                 const o = (y * smallW + x) * 4;
-                maxed[o] = mr; maxed[o + 1] = mg; maxed[o + 2] = mb; maxed[o + 3] = 255;
+                out[o] = r; out[o + 1] = g; out[o + 2] = b; out[o + 3] = 255;
             }
         }
-        cur = maxed;
-    }
+        return out;
+    };
 
-    // Deux passes de flou boîte 3x3 : lisse la carte sans déborder les ombres
-    for (let pass = 0; pass < 2; pass++) {
-        const blurred = new Uint8ClampedArray(cur.length);
-        for (let y = 0; y < smallH; y++) {
-            for (let x = 0; x < smallW; x++) {
-                let sr = 0, sg = 0, sb = 0, cnt = 0;
-                for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-                    const yy = Math.min(smallH - 1, Math.max(0, y + dy));
-                    const xx = Math.min(smallW - 1, Math.max(0, x + dx));
-                    const i = (yy * smallW + xx) * 4;
-                    sr += cur[i]; sg += cur[i + 1]; sb += cur[i + 2]; cnt++;
-                }
-                const o = (y * smallW + x) * 4;
-                blurred[o] = sr / cnt; blurred[o + 1] = sg / cnt; blurred[o + 2] = sb / cnt; blurred[o + 3] = 255;
+    // Fermeture : 3 dilatations puis 3 érosions (efface le texte,
+    // préserve les contours des ombres et reflets)
+    let cur = sd.data;
+    cur = morph5(cur, true);
+    cur = morph5(cur, true);
+    cur = morph5(cur, true);
+    cur = morph5(cur, false);
+    cur = morph5(cur, false);
+    cur = morph5(cur, false);
+
+    // Une passe de flou boîte 3x3 pour éviter les marches d'escalier
+    const blurred = new Uint8ClampedArray(cur.length);
+    for (let y = 0; y < smallH; y++) {
+        for (let x = 0; x < smallW; x++) {
+            let sr = 0, sg = 0, sb = 0, cnt = 0;
+            for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+                const yy = Math.min(smallH - 1, Math.max(0, y + dy));
+                const xx = Math.min(smallW - 1, Math.max(0, x + dx));
+                const i = (yy * smallW + xx) * 4;
+                sr += cur[i]; sg += cur[i + 1]; sb += cur[i + 2]; cnt++;
             }
+            const o = (y * smallW + x) * 4;
+            blurred[o] = sr / cnt; blurred[o + 1] = sg / cnt; blurred[o + 2] = sb / cnt; blurred[o + 3] = 255;
         }
-        cur = blurred;
     }
-    sd.data.set(cur);
+    sd.data.set(blurred);
     smctx.putImageData(sd, 0, 0);
 
-    // Remise à l'échelle avec lissage bilinéaire natif = flou du fond
+    // Remise à l'échelle avec lissage bilinéaire natif
     const bg = document.createElement('canvas');
     bg.width = w; bg.height = h;
     const bgctx = bg.getContext('2d');
@@ -3787,10 +3853,10 @@ function enhanceBW(canvas) {
         gray[i] = v > 255 ? 255 : v;
     }
 
-    // 2. Accentuation (unsharp mask) avant seuillage
+    // 2. Accentuation légère (une trop forte accentue les bords d'ombre)
     const blurred = gaussianBlur5(gray, w, h);
     for (let i = 0; i < n; i++) {
-        const v = gray[i] + 0.7 * (gray[i] - blurred[i]);
+        const v = gray[i] + 0.45 * (gray[i] - blurred[i]);
         gray[i] = v < 0 ? 0 : v > 255 ? 255 : v;
     }
 
@@ -3811,7 +3877,7 @@ function enhanceBW(canvas) {
     // Sauvola: T = m * (1 + k*((s/R) - 1))
     const win = Math.max(15, (Math.round(Math.max(w, h) / 55) | 1));
     const half = win >> 1;
-    const k = 0.22, R = 128;
+    const k = 0.25, R = 128;
     const bin = new Uint8Array(n);
     for (let y = 0; y < h; y++) {
         const y0 = Math.max(0, y - half), y1 = Math.min(h - 1, y + half);
@@ -3825,11 +3891,9 @@ function enhanceBW(canvas) {
             const mean = sum / area;
             const variance = Math.max(0, sum2 / area - mean * mean);
             const T = mean * (1 + k * (Math.sqrt(variance) / R - 1));
-            // Sur image normalisée le papier est ~blanc : un pixel n'est de
-            // l'encre que s'il est sous le seuil local ET réellement sombre
-            // (élimine les halos résiduels aux bords d'ombre nets)
-            const g = gray[y * w + x];
-            bin[y * w + x] = (g > T || g > 185) ? 1 : 0;
+            // Seuil purement local : préserve le texte pâli dans les zones
+            // surexposées (reflets) que couperait un seuil absolu
+            bin[y * w + x] = gray[y * w + x] > T ? 1 : 0;
         }
     }
 
