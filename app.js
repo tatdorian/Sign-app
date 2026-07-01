@@ -2137,19 +2137,27 @@ function applyView() {
     if (container) {
         container.classList.toggle('view-editor', currentView === 'editor');
         container.classList.toggle('view-signature', currentView === 'signature');
+        container.classList.toggle('view-scanner', currentView === 'scanner');
     }
 
     const isEditor = currentView === 'editor';
+    const isScanner = currentView === 'scanner';
+
+    // Le service Scanner remplace la carte Document
+    const uploadSection = document.getElementById('upload-section');
+    const scannerSection = document.getElementById('scanner-section');
+    if (uploadSection)  uploadSection.style.display  = isScanner ? 'none' : 'block';
+    if (scannerSection) scannerSection.style.display = isScanner ? 'block' : 'none';
 
     // Sections propres au service Signature
-    if (signatureSection) signatureSection.style.display = (!isEditor && documentLoaded) ? 'block' : 'none';
-    if (parapheSection)   parapheSection.style.display   = (!isEditor && documentLoaded) ? 'block' : 'none';
-    if (actionsSection)   actionsSection.style.display   = documentLoaded ? 'block' : 'none';
+    if (signatureSection) signatureSection.style.display = (!isEditor && !isScanner && documentLoaded) ? 'block' : 'none';
+    if (parapheSection)   parapheSection.style.display   = (!isEditor && !isScanner && documentLoaded) ? 'block' : 'none';
+    if (actionsSection)   actionsSection.style.display   = (!isScanner && documentLoaded) ? 'block' : 'none';
 
     const sizeControl = document.getElementById('signature-size-control');
     const placementControl = document.getElementById('sig-placement-control');
-    if (sizeControl)      sizeControl.style.display      = (!isEditor && documentLoaded) ? 'block' : 'none';
-    if (placementControl) placementControl.style.display = (!isEditor && documentLoaded) ? 'flex'  : 'none';
+    if (sizeControl)      sizeControl.style.display      = (!isEditor && !isScanner && documentLoaded) ? 'block' : 'none';
+    if (placementControl) placementControl.style.display = (!isEditor && !isScanner && documentLoaded) ? 'flex'  : 'none';
 
     // Barre + overlay de l'éditeur
     if (editorOverlay) editorOverlay.style.display = documentLoaded ? 'block' : 'none';
@@ -2169,7 +2177,7 @@ function applyView() {
 }
 
 function setView(view) {
-    if (view !== 'signature' && view !== 'editor') return;
+    if (view !== 'signature' && view !== 'editor' && view !== 'scanner') return;
     currentView = view;
     applyView();
     // Repositionner l'overlay si on arrive sur l'éditeur
@@ -2785,3 +2793,746 @@ async function embedEditorElements(pdfDoc, pages) {
 
 // Appliquer le service par défaut au démarrage
 applyView();
+
+// ==============================================
+// SCANNER DE DOCUMENTS — pipeline 100 % client
+// (détection de coins, homographie, filtres scanner)
+// ==============================================
+const scanState = {
+    source: null,     // canvas source plein format (plafonné)
+    quad: null,       // 4 coins normalisés [0..1] — ordre TL,TR,BR,BL
+    warped: null,     // canvas redressé (avant filtres)
+    mode: 'bw'
+};
+
+const scanSection     = document.getElementById('scanner-section');
+const scanCaptureStep = document.getElementById('scan-capture');
+const scanAdjustStep  = document.getElementById('scan-adjust');
+const scanResultStep  = document.getElementById('scan-result');
+const scanInput       = document.getElementById('scan-input');
+const scanInputGal    = document.getElementById('scan-input-gallery');
+const scanPreview     = document.getElementById('scan-preview');
+const scanQuadSvg     = document.getElementById('scan-quad-svg');
+const scanQuadPoly    = document.getElementById('scan-quad-poly');
+const scanLoupe       = document.getElementById('scan-loupe');
+const scanLoupeCanvas = document.getElementById('scan-loupe-canvas');
+const scanResultCanvas = document.getElementById('scan-result-canvas');
+const scanProcessing  = document.getElementById('scan-processing');
+
+function scanShowStep(step) {
+    if (scanCaptureStep) scanCaptureStep.style.display = step === 'capture' ? 'block' : 'none';
+    if (scanAdjustStep)  scanAdjustStep.style.display  = step === 'adjust'  ? 'block' : 'none';
+    if (scanResultStep)  scanResultStep.style.display  = step === 'result'  ? 'block' : 'none';
+}
+
+// ---------- Capture ----------
+async function scanLoadFile(file) {
+    if (!file || !file.type.startsWith('image/')) return;
+    showLoader();
+    try {
+        let bmp = null;
+        try {
+            bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+        } catch (e1) {
+            try { bmp = await createImageBitmap(file); } catch (e2) { bmp = null; }
+        }
+        if (!bmp) {
+            bmp = await new Promise((res, rej) => {
+                const url = URL.createObjectURL(file);
+                const im = new Image();
+                im.onload = () => { URL.revokeObjectURL(url); res(im); };
+                im.onerror = rej;
+                im.src = url;
+            });
+        }
+        const bw = bmp.width || bmp.naturalWidth, bh = bmp.height || bmp.naturalHeight;
+        // Plafonner la source (mémoire + perfs)
+        const maxSide = 3000;
+        const s = Math.min(1, maxSide / Math.max(bw, bh));
+        const src = document.createElement('canvas');
+        src.width = Math.round(bw * s); src.height = Math.round(bh * s);
+        src.getContext('2d').drawImage(bmp, 0, 0, src.width, src.height);
+        if (bmp.close) bmp.close();
+        scanState.source = src;
+
+        // Détection automatique des coins (sur version réduite)
+        scanState.quad = detectDocumentQuad(src) || defaultQuad();
+
+        drawScanPreview();
+        scanShowStep('adjust');
+    } catch (err) {
+        console.error('Scanner chargement image:', err);
+        alert('Impossible de charger cette image: ' + err.message);
+    } finally {
+        hideLoader();
+    }
+}
+
+function defaultQuad() {
+    const m = 0.08;
+    return [{ x: m, y: m }, { x: 1 - m, y: m }, { x: 1 - m, y: 1 - m }, { x: m, y: 1 - m }];
+}
+
+const scanTakeBtn = document.getElementById('scan-take-btn');
+const scanGalleryBtn = document.getElementById('scan-gallery-btn');
+if (scanTakeBtn && scanInput) scanTakeBtn.addEventListener('click', () => scanInput.click());
+if (scanGalleryBtn && scanInputGal) scanGalleryBtn.addEventListener('click', () => scanInputGal.click());
+if (scanInput) scanInput.addEventListener('change', () => { scanLoadFile(scanInput.files[0]); scanInput.value = ''; });
+if (scanInputGal) scanInputGal.addEventListener('change', () => { scanLoadFile(scanInputGal.files[0]); scanInputGal.value = ''; });
+
+const scanDrop = document.getElementById('scan-drop');
+if (scanDrop) {
+    scanDrop.addEventListener('dragover', (e) => { e.preventDefault(); scanDrop.classList.add('dragover'); });
+    scanDrop.addEventListener('dragleave', () => scanDrop.classList.remove('dragover'));
+    scanDrop.addEventListener('drop', (e) => {
+        e.preventDefault(); scanDrop.classList.remove('dragover');
+        const f = e.dataTransfer.files && e.dataTransfer.files[0];
+        if (f) scanLoadFile(f);
+    });
+}
+
+// ---------- Aperçu + poignées ----------
+function drawScanPreview() {
+    if (!scanState.source || !scanPreview) return;
+    const src = scanState.source;
+    const pw = Math.min(1000, src.width);
+    const ph = Math.round(pw * src.height / src.width);
+    scanPreview.width = pw; scanPreview.height = ph;
+    scanPreview.getContext('2d').drawImage(src, 0, 0, pw, ph);
+    if (scanQuadSvg) scanQuadSvg.setAttribute('viewBox', `0 0 ${pw} ${ph}`);
+    updateQuadUI();
+}
+
+function updateQuadUI() {
+    if (!scanState.quad || !scanQuadPoly) return;
+    const pw = scanPreview.width, ph = scanPreview.height;
+    const pts = scanState.quad.map(p => `${(p.x * pw).toFixed(1)},${(p.y * ph).toFixed(1)}`).join(' ');
+    scanQuadPoly.setAttribute('points', pts);
+    const handles = scanQuadSvg.querySelectorAll('.scan-handle');
+    handles.forEach(h => {
+        const i = parseInt(h.dataset.corner);
+        h.setAttribute('cx', (scanState.quad[i].x * pw).toFixed(1));
+        h.setAttribute('cy', (scanState.quad[i].y * ph).toFixed(1));
+    });
+}
+
+// Drag des poignées (pointer events + loupe)
+if (scanQuadSvg) {
+    scanQuadSvg.querySelectorAll('.scan-handle').forEach(handle => {
+        handle.addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            const corner = parseInt(handle.dataset.corner);
+            handle.setPointerCapture(e.pointerId);
+            const move = (ev) => {
+                const rect = scanQuadSvg.getBoundingClientRect();
+                let nx = (ev.clientX - rect.left) / rect.width;
+                let ny = (ev.clientY - rect.top) / rect.height;
+                nx = Math.max(0, Math.min(1, nx));
+                ny = Math.max(0, Math.min(1, ny));
+                scanState.quad[corner] = { x: nx, y: ny };
+                updateQuadUI();
+                updateLoupe(nx, ny, ev.clientX - rect.left, ev.clientY - rect.top, rect);
+            };
+            const up = () => {
+                handle.removeEventListener('pointermove', move);
+                handle.removeEventListener('pointerup', up);
+                if (scanLoupe) scanLoupe.style.display = 'none';
+            };
+            handle.addEventListener('pointermove', move);
+            handle.addEventListener('pointerup', up);
+        });
+    });
+}
+
+function updateLoupe(nx, ny, dispX, dispY, rect) {
+    if (!scanLoupe || !scanLoupeCanvas || !scanPreview) return;
+    scanLoupe.style.display = 'block';
+    // Position: au-dessus du doigt, rabattue si près des bords
+    const L = 120;
+    let lx = dispX - L / 2;
+    let ly = dispY - L - 28;
+    if (ly < 0) ly = dispY + 28;
+    lx = Math.max(0, Math.min(lx, rect.width - L));
+    scanLoupe.style.left = lx + 'px';
+    scanLoupe.style.top = ly + 'px';
+    // Zoom x2.5 autour du coin
+    const ctx = scanLoupeCanvas.getContext('2d');
+    const zoom = 2.5;
+    const srcSize = L / zoom;
+    const cx = nx * scanPreview.width, cy = ny * scanPreview.height;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, L, L);
+    ctx.drawImage(scanPreview,
+        cx - srcSize / 2, cy - srcSize / 2, srcSize, srcSize,
+        0, 0, L, L);
+}
+
+// ---------- Étapes ----------
+const scanRetakeBtn = document.getElementById('scan-retake-btn');
+const scanValidateBtn = document.getElementById('scan-validate-btn');
+const scanBackBtn = document.getElementById('scan-back-btn');
+if (scanRetakeBtn) scanRetakeBtn.addEventListener('click', () => scanShowStep('capture'));
+if (scanBackBtn) scanBackBtn.addEventListener('click', () => scanShowStep('adjust'));
+
+if (scanValidateBtn) {
+    scanValidateBtn.addEventListener('click', async () => {
+        if (!scanState.source || !scanState.quad) return;
+        showLoader();
+        // Laisser le loader s'afficher avant le calcul lourd
+        await new Promise(r => setTimeout(r, 30));
+        try {
+            scanState.warped = warpDocument(scanState.source, orderQuad(scanState.quad));
+            scanShowStep('result');
+            await applyScanMode();
+        } catch (err) {
+            console.error('Scanner warp:', err);
+            alert('Erreur lors du redressement: ' + err.message);
+        } finally {
+            hideLoader();
+        }
+    });
+}
+
+// Modes de rendu
+document.querySelectorAll('.scan-mode-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+        document.querySelectorAll('.scan-mode-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        scanState.mode = btn.dataset.scanMode;
+        await applyScanMode();
+    });
+});
+
+async function applyScanMode() {
+    if (!scanState.warped || !scanResultCanvas) return;
+    if (scanProcessing) scanProcessing.style.display = 'flex';
+    await new Promise(r => setTimeout(r, 20));
+    try {
+        const w = scanState.warped;
+        scanResultCanvas.width = w.width;
+        scanResultCanvas.height = w.height;
+        const ctx = scanResultCanvas.getContext('2d');
+        if (scanState.mode === 'original') {
+            ctx.drawImage(w, 0, 0);
+        } else if (scanState.mode === 'color') {
+            ctx.putImageData(enhanceColor(w), 0, 0);
+        } else {
+            ctx.putImageData(enhanceBW(w), 0, 0);
+        }
+    } finally {
+        if (scanProcessing) scanProcessing.style.display = 'none';
+    }
+}
+
+// ---------- Détection automatique des coins ----------
+// Pipeline: réduction -> gris -> gaussien -> Sobel/Canny -> dilatation
+// -> composantes connexes -> enveloppe convexe -> réduction à 4 sommets
+function detectDocumentQuad(srcCanvas) {
+    try {
+        const maxSide = 420;
+        const s = maxSide / Math.max(srcCanvas.width, srcCanvas.height);
+        const w = Math.max(2, Math.round(srcCanvas.width * s));
+        const h = Math.max(2, Math.round(srcCanvas.height * s));
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        const cctx = cv.getContext('2d');
+        cctx.drawImage(srcCanvas, 0, 0, w, h);
+        const data = cctx.getImageData(0, 0, w, h).data;
+
+        // Niveaux de gris
+        let gray = new Float32Array(w * h);
+        for (let i = 0, j = 0; i < gray.length; i++, j += 4) {
+            gray[i] = 0.299 * data[j] + 0.587 * data[j + 1] + 0.114 * data[j + 2];
+        }
+        gray = gaussianBlur5(gray, w, h);
+
+        // Gradients de Sobel
+        const mag = new Float32Array(w * h);
+        const dir = new Uint8Array(w * h); // 0:0°, 1:45°, 2:90°, 3:135°
+        let maxMag = 0;
+        for (let y = 1; y < h - 1; y++) {
+            for (let x = 1; x < w - 1; x++) {
+                const i = y * w + x;
+                const gx = -gray[i - w - 1] - 2 * gray[i - 1] - gray[i + w - 1]
+                          + gray[i - w + 1] + 2 * gray[i + 1] + gray[i + w + 1];
+                const gy = -gray[i - w - 1] - 2 * gray[i - w] - gray[i - w + 1]
+                          + gray[i + w - 1] + 2 * gray[i + w] + gray[i + w + 1];
+                const m = Math.hypot(gx, gy);
+                mag[i] = m;
+                if (m > maxMag) maxMag = m;
+                const a = Math.atan2(gy, gx) * 180 / Math.PI;
+                const aa = ((a % 180) + 180) % 180;
+                dir[i] = aa < 22.5 || aa >= 157.5 ? 0 : aa < 67.5 ? 1 : aa < 112.5 ? 2 : 3;
+            }
+        }
+
+        // Suppression des non-maxima
+        const nms = new Float32Array(w * h);
+        for (let y = 1; y < h - 1; y++) {
+            for (let x = 1; x < w - 1; x++) {
+                const i = y * w + x;
+                const m = mag[i];
+                if (m === 0) continue;
+                let a = 0, b = 0;
+                switch (dir[i]) {
+                    case 0: a = mag[i - 1]; b = mag[i + 1]; break;
+                    case 1: a = mag[i - w + 1]; b = mag[i + w - 1]; break;
+                    case 2: a = mag[i - w]; b = mag[i + w]; break;
+                    default: a = mag[i - w - 1]; b = mag[i + w + 1];
+                }
+                if (m >= a && m >= b) nms[i] = m;
+            }
+        }
+
+        // Seuils d'hystérésis auto : percentiles décroissants.
+        // Le texte du document produit des gradients très forts qui tirent le
+        // percentile vers le haut ; si aucun quad n'émerge, on abaisse le seuil
+        // jusqu'à récupérer le bord (moins contrasté) du document.
+        const sample = [];
+        for (let i = 0; i < nms.length; i += 7) if (nms[i] > 0) sample.push(nms[i]);
+        sample.sort((a, b) => a - b);
+        if (!sample.length) return null;
+
+        for (const pct of [0.9, 0.78, 0.62, 0.45, 0.3]) {
+            const high = sample[Math.floor(sample.length * pct)];
+            const low = high * 0.4;
+            const best = quadFromNms(nms, w, h, high, low);
+            if (best) {
+                return orderQuad(best.map(p => ({ x: p[0] / w, y: p[1] / h })));
+            }
+        }
+        return null;
+    } catch (err) {
+        console.warn('Détection coins:', err);
+        return null;
+    }
+}
+
+// Hystérésis + composantes connexes + enveloppe convexe -> meilleur quad
+function quadFromNms(nms, w, h, high, low) {
+    const edges = new Uint8Array(w * h);
+    const stack = [];
+    for (let i = 0; i < nms.length; i++) {
+        if (nms[i] >= high && !edges[i]) {
+            edges[i] = 1; stack.push(i);
+            while (stack.length) {
+                const c = stack.pop();
+                const cy = (c / w) | 0, cx = c % w;
+                for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+                    const ny = cy + dy, nx2 = cx + dx;
+                    if (ny < 0 || ny >= h || nx2 < 0 || nx2 >= w) continue;
+                    const n = ny * w + nx2;
+                    if (!edges[n] && nms[n] >= low) { edges[n] = 1; stack.push(n); }
+                }
+            }
+        }
+    }
+
+    // Dilatation 3x3 (referme les petites coupures)
+    const dil = new Uint8Array(w * h);
+    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+        const i = y * w + x;
+        if (edges[i] || edges[i - 1] || edges[i + 1] || edges[i - w] || edges[i + w]) dil[i] = 1;
+    }
+
+    // Composantes connexes -> quad candidat par enveloppe convexe
+    const seen = new Uint8Array(w * h);
+    const totalArea = w * h;
+    let best = null, bestArea = 0;
+    for (let i = 0; i < dil.length; i++) {
+        if (!dil[i] || seen[i]) continue;
+        const pts = [];
+        const st = [i]; seen[i] = 1;
+        let minX = w, maxX = 0, minY = h, maxY = 0;
+        while (st.length) {
+            const c = st.pop();
+            const cy = (c / w) | 0, cx = c % w;
+            pts.push([cx, cy]);
+            if (cx < minX) minX = cx; if (cx > maxX) maxX = cx;
+            if (cy < minY) minY = cy; if (cy > maxY) maxY = cy;
+            for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+                const ny = cy + dy, nx2 = cx + dx;
+                if (ny < 0 || ny >= h || nx2 < 0 || nx2 >= w) continue;
+                const n = ny * w + nx2;
+                if (dil[n] && !seen[n]) { seen[n] = 1; st.push(n); }
+            }
+        }
+        const bboxArea = (maxX - minX) * (maxY - minY);
+        if (bboxArea < totalArea * 0.2) continue;
+
+        const hull = convexHull(pts);
+        if (hull.length < 4) continue;
+        const quad = hullToQuad(hull);
+        if (!quad) continue;
+        const qa = polygonArea(quad);
+        if (qa < totalArea * 0.2) continue;
+        // Le quad doit remplir raisonnablement sa propre bbox (rejette les "L")
+        if (qa < bboxArea * 0.5) continue;
+        if (qa > bestArea) { bestArea = qa; best = quad; }
+    }
+    return best;
+}
+
+function gaussianBlur5(src, w, h) {
+    // Noyau séparable [1,4,6,4,1]/16
+    const k = [1 / 16, 4 / 16, 6 / 16, 4 / 16, 1 / 16];
+    const tmp = new Float32Array(w * h);
+    const out = new Float32Array(w * h);
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            let s = 0;
+            for (let j = -2; j <= 2; j++) {
+                const xx = Math.min(w - 1, Math.max(0, x + j));
+                s += src[y * w + xx] * k[j + 2];
+            }
+            tmp[y * w + x] = s;
+        }
+    }
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            let s = 0;
+            for (let j = -2; j <= 2; j++) {
+                const yy = Math.min(h - 1, Math.max(0, y + j));
+                s += tmp[yy * w + x] * k[j + 2];
+            }
+            out[y * w + x] = s;
+        }
+    }
+    return out;
+}
+
+// Enveloppe convexe (monotone chain) — points [[x,y],...]
+function convexHull(points) {
+    if (points.length < 3) return points.slice();
+    const pts = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    const lower = [];
+    for (const p of pts) {
+        while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+        lower.push(p);
+    }
+    const upper = [];
+    for (let i = pts.length - 1; i >= 0; i--) {
+        const p = pts[i];
+        while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+        upper.push(p);
+    }
+    lower.pop(); upper.pop();
+    return lower.concat(upper);
+}
+
+// Réduire l'enveloppe à 4 sommets: on retire itérativement le sommet
+// dont la suppression modifie le moins l'aire (décimation)
+function hullToQuad(hull) {
+    let poly = hull.slice();
+    while (poly.length > 4) {
+        let minLoss = Infinity, minIdx = -1;
+        for (let i = 0; i < poly.length; i++) {
+            const a = poly[(i - 1 + poly.length) % poly.length];
+            const b = poly[i];
+            const c = poly[(i + 1) % poly.length];
+            const loss = Math.abs((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])) / 2;
+            if (loss < minLoss) { minLoss = loss; minIdx = i; }
+        }
+        poly.splice(minIdx, 1);
+    }
+    return poly.length === 4 ? poly : null;
+}
+
+function polygonArea(poly) {
+    let a = 0;
+    for (let i = 0; i < poly.length; i++) {
+        const p = poly[i], q = poly[(i + 1) % poly.length];
+        a += p[0] * q[1] - q[0] * p[1];
+    }
+    return Math.abs(a) / 2;
+}
+
+// Ordonner TL, TR, BR, BL
+function orderQuad(quad) {
+    const pts = quad.map(p => (p.x !== undefined ? p : { x: p[0], y: p[1] }));
+    const tl = pts.reduce((m, p) => (p.x + p.y < m.x + m.y ? p : m));
+    const br = pts.reduce((m, p) => (p.x + p.y > m.x + m.y ? p : m));
+    const tr = pts.reduce((m, p) => (p.x - p.y > m.x - m.y ? p : m));
+    const bl = pts.reduce((m, p) => (p.x - p.y < m.x - m.y ? p : m));
+    return [tl, tr, br, bl];
+}
+
+// ---------- Homographie + redressement ----------
+// Résout H (dst -> src) à partir de 4 correspondances — système 8x8 (Gauss)
+function computeHomography(srcPts, dstPts) {
+    // On veut mapper chaque point de DESTINATION vers la SOURCE
+    const A = [], B = [];
+    for (let i = 0; i < 4; i++) {
+        const { x: X, y: Y } = dstPts[i];   // destination (rectangle)
+        const { x: u, y: v } = srcPts[i];   // source (quad photo)
+        A.push([X, Y, 1, 0, 0, 0, -X * u, -Y * u]); B.push(u);
+        A.push([0, 0, 0, X, Y, 1, -X * v, -Y * v]); B.push(v);
+    }
+    // Élimination de Gauss avec pivot partiel
+    for (let c = 0; c < 8; c++) {
+        let piv = c;
+        for (let r = c + 1; r < 8; r++) if (Math.abs(A[r][c]) > Math.abs(A[piv][c])) piv = r;
+        if (Math.abs(A[piv][c]) < 1e-12) throw new Error('Quadrilatère dégénéré');
+        [A[c], A[piv]] = [A[piv], A[c]];
+        [B[c], B[piv]] = [B[piv], B[c]];
+        for (let r = c + 1; r < 8; r++) {
+            const f = A[r][c] / A[c][c];
+            for (let k = c; k < 8; k++) A[r][k] -= f * A[c][k];
+            B[r] -= f * B[c];
+        }
+    }
+    const hh = new Array(8);
+    for (let r = 7; r >= 0; r--) {
+        let s = B[r];
+        for (let k = r + 1; k < 8; k++) s -= A[r][k] * hh[k];
+        hh[r] = s / A[r][r];
+    }
+    return [hh[0], hh[1], hh[2], hh[3], hh[4], hh[5], hh[6], hh[7], 1];
+}
+
+function warpDocument(srcCanvas, quadNorm) {
+    const sw = srcCanvas.width, sh = srcCanvas.height;
+    let quad = quadNorm.map(p => ({ x: p.x * sw, y: p.y * sh }));
+    // Rétrécir légèrement vers le centre pour ne pas inclure le bord/fond
+    const cx = quad.reduce((s, p) => s + p.x, 0) / 4;
+    const cy = quad.reduce((s, p) => s + p.y, 0) / 4;
+    const shrink = 0.006;
+    quad = quad.map(p => ({ x: p.x + (cx - p.x) * shrink, y: p.y + (cy - p.y) * shrink }));
+    const [tl, tr, br, bl] = quad;
+
+    // Dimensions réelles estimées (moyenne des côtés opposés)
+    const topLen = Math.hypot(tr.x - tl.x, tr.y - tl.y);
+    const botLen = Math.hypot(br.x - bl.x, br.y - bl.y);
+    const leftLen = Math.hypot(bl.x - tl.x, bl.y - tl.y);
+    const rightLen = Math.hypot(br.x - tr.x, br.y - tr.y);
+    let outW = Math.round((topLen + botLen) / 2);
+    let outH = Math.round((leftLen + rightLen) / 2);
+
+    // Snap sur le ratio A4 si proche (±8 %)
+    const A4 = 297 / 210;
+    const ratio = outH / outW;
+    if (Math.abs(ratio - A4) / A4 < 0.08) outH = Math.round(outW * A4);
+    else if (Math.abs(1 / ratio - A4) / A4 < 0.08) outW = Math.round(outH * A4);
+
+    // Plafonner la sortie
+    const cap = 2400;
+    const cs = Math.min(1, cap / Math.max(outW, outH));
+    outW = Math.max(8, Math.round(outW * cs));
+    outH = Math.max(8, Math.round(outH * cs));
+
+    const H = computeHomography(quad, [
+        { x: 0, y: 0 }, { x: outW - 1, y: 0 },
+        { x: outW - 1, y: outH - 1 }, { x: 0, y: outH - 1 }
+    ]);
+
+    const sctx = srcCanvas.getContext('2d');
+    const sdata = sctx.getImageData(0, 0, sw, sh).data;
+    const out = new ImageData(outW, outH);
+    const odata = out.data;
+
+    for (let y = 0; y < outH; y++) {
+        const Hy1 = H[1] * y + H[2], Hy4 = H[4] * y + H[5], Hy7 = H[7] * y + 1;
+        for (let x = 0; x < outW; x++) {
+            const d = H[6] * x + Hy7;
+            const u = (H[0] * x + Hy1) / d;
+            const v = (H[3] * x + Hy4) / d;
+            const oi = (y * outW + x) * 4;
+            if (u < 0 || v < 0 || u > sw - 1 || v > sh - 1) {
+                odata[oi] = odata[oi + 1] = odata[oi + 2] = 255; odata[oi + 3] = 255;
+                continue;
+            }
+            // Interpolation bilinéaire
+            const x0 = u | 0, y0 = v | 0;
+            const x1 = Math.min(x0 + 1, sw - 1), y1 = Math.min(y0 + 1, sh - 1);
+            const fx = u - x0, fy = v - y0;
+            const i00 = (y0 * sw + x0) * 4, i10 = (y0 * sw + x1) * 4;
+            const i01 = (y1 * sw + x0) * 4, i11 = (y1 * sw + x1) * 4;
+            for (let c = 0; c < 3; c++) {
+                const top = sdata[i00 + c] * (1 - fx) + sdata[i10 + c] * fx;
+                const bot = sdata[i01 + c] * (1 - fx) + sdata[i11 + c] * fx;
+                odata[oi + c] = top * (1 - fy) + bot * fy;
+            }
+            odata[oi + 3] = 255;
+        }
+    }
+
+    const outCv = document.createElement('canvas');
+    outCv.width = outW; outCv.height = outH;
+    outCv.getContext('2d').putImageData(out, 0, 0);
+    return outCv;
+}
+
+// ---------- Filtres "qualité scanner" ----------
+// Estimation du fond (illumination) : réduction forte + filtre max + flou,
+// puis remise à l'échelle. Divise l'image par ce fond => ombres éliminées.
+function estimateBackground(canvas) {
+    const w = canvas.width, h = canvas.height;
+    const smallW = 48, smallH = Math.max(8, Math.round(smallW * h / w));
+    const sm = document.createElement('canvas');
+    sm.width = smallW; sm.height = smallH;
+    const smctx = sm.getContext('2d');
+    smctx.drawImage(canvas, 0, 0, smallW, smallH);
+    const sd = smctx.getImageData(0, 0, smallW, smallH);
+    const px = sd.data;
+
+    // Filtre max 5x5 par canal (le fond est l'enveloppe claire)
+    const maxed = new Uint8ClampedArray(px.length);
+    for (let y = 0; y < smallH; y++) {
+        for (let x = 0; x < smallW; x++) {
+            let mr = 0, mg = 0, mb = 0;
+            for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+                const yy = Math.min(smallH - 1, Math.max(0, y + dy));
+                const xx = Math.min(smallW - 1, Math.max(0, x + dx));
+                const i = (yy * smallW + xx) * 4;
+                if (px[i] > mr) mr = px[i];
+                if (px[i + 1] > mg) mg = px[i + 1];
+                if (px[i + 2] > mb) mb = px[i + 2];
+            }
+            const o = (y * smallW + x) * 4;
+            maxed[o] = mr; maxed[o + 1] = mg; maxed[o + 2] = mb; maxed[o + 3] = 255;
+        }
+    }
+    sd.data.set(maxed);
+    smctx.putImageData(sd, 0, 0);
+
+    // Remise à l'échelle avec lissage bilinéaire natif = flou du fond
+    const bg = document.createElement('canvas');
+    bg.width = w; bg.height = h;
+    const bgctx = bg.getContext('2d');
+    bgctx.imageSmoothingEnabled = true;
+    bgctx.imageSmoothingQuality = 'high';
+    bgctx.drawImage(sm, 0, 0, w, h);
+    return bgctx.getImageData(0, 0, w, h).data;
+}
+
+// Mode COULEUR: division par le fond => fond blanc, encre préservée
+function enhanceColor(canvas) {
+    const w = canvas.width, h = canvas.height;
+    const img = canvas.getContext('2d').getImageData(0, 0, w, h);
+    const d = img.data;
+    const bg = estimateBackground(canvas);
+    for (let i = 0; i < d.length; i += 4) {
+        for (let c = 0; c < 3; c++) {
+            const b = Math.max(1, bg[i + c]);
+            let v = d[i + c] / b * 250;
+            // Légère courbe de contraste
+            v = (v - 128) * 1.12 + 132;
+            d[i + c] = v < 0 ? 0 : v > 255 ? 255 : v;
+        }
+    }
+    return img;
+}
+
+// Mode NOIR & BLANC: netteté + binarisation adaptative de Sauvola
+// via images intégrales (O(n), fenêtre locale => élimine les ombres)
+function enhanceBW(canvas) {
+    const w = canvas.width, h = canvas.height;
+    const img = canvas.getContext('2d').getImageData(0, 0, w, h);
+    const d = img.data;
+    const n = w * h;
+
+    // Niveaux de gris
+    let gray = new Float32Array(n);
+    for (let i = 0, j = 0; i < n; i++, j += 4) {
+        gray[i] = 0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2];
+    }
+
+    // Accentuation (unsharp mask léger) avant seuillage
+    const blurred = gaussianBlur5(gray, w, h);
+    for (let i = 0; i < n; i++) {
+        const v = gray[i] + 0.7 * (gray[i] - blurred[i]);
+        gray[i] = v < 0 ? 0 : v > 255 ? 255 : v;
+    }
+
+    // Images intégrales (somme et somme des carrés)
+    const W = w + 1;
+    const sat = new Float64Array(W * (h + 1));
+    const sat2 = new Float64Array(W * (h + 1));
+    for (let y = 1; y <= h; y++) {
+        let rowSum = 0, rowSum2 = 0;
+        for (let x = 1; x <= w; x++) {
+            const g = gray[(y - 1) * w + (x - 1)];
+            rowSum += g; rowSum2 += g * g;
+            sat[y * W + x] = sat[(y - 1) * W + x] + rowSum;
+            sat2[y * W + x] = sat2[(y - 1) * W + x] + rowSum2;
+        }
+    }
+
+    // Sauvola: T = m * (1 + k*((s/R) - 1))
+    const win = Math.max(15, (Math.round(Math.max(w, h) / 55) | 1));
+    const half = win >> 1;
+    const k = 0.22, R = 128;
+    for (let y = 0; y < h; y++) {
+        const y0 = Math.max(0, y - half), y1 = Math.min(h - 1, y + half);
+        for (let x = 0; x < w; x++) {
+            const x0 = Math.max(0, x - half), x1 = Math.min(w - 1, x + half);
+            const area = (x1 - x0 + 1) * (y1 - y0 + 1);
+            const sum = sat[(y1 + 1) * W + (x1 + 1)] - sat[(y0) * W + (x1 + 1)]
+                      - sat[(y1 + 1) * W + (x0)] + sat[(y0) * W + (x0)];
+            const sum2 = sat2[(y1 + 1) * W + (x1 + 1)] - sat2[(y0) * W + (x1 + 1)]
+                       - sat2[(y1 + 1) * W + (x0)] + sat2[(y0) * W + (x0)];
+            const mean = sum / area;
+            const variance = Math.max(0, sum2 / area - mean * mean);
+            const T = mean * (1 + k * (Math.sqrt(variance) / R - 1));
+            const v = gray[y * w + x] > T ? 255 : 0;
+            const j = (y * w + x) * 4;
+            d[j] = d[j + 1] = d[j + 2] = v;
+            d[j + 3] = 255;
+        }
+    }
+    return img;
+}
+
+// ---------- Sortie ----------
+const scanUseBtn = document.getElementById('scan-use-btn');
+if (scanUseBtn) {
+    scanUseBtn.addEventListener('click', () => {
+        if (!scanResultCanvas || !scanResultCanvas.width) return;
+        scanResultCanvas.toBlob((blob) => {
+            if (!blob) return;
+            const file = new File([blob], `scan_${Date.now()}.png`, { type: 'image/png' });
+            setView('signature');
+            handleFileUpload({ target: { files: [file] } });
+        }, 'image/png');
+    });
+}
+
+const scanPdfBtn = document.getElementById('scan-pdf-btn');
+if (scanPdfBtn) {
+    scanPdfBtn.addEventListener('click', async () => {
+        if (!scanResultCanvas || !scanResultCanvas.width) return;
+        try {
+            showLoader();
+            const { PDFDocument } = PDFLib;
+            const pdfDoc = await PDFDocument.create();
+            // ~200 DPI : conversion px -> points PDF
+            const scalePt = 72 / 200;
+            const pw = scanResultCanvas.width * scalePt;
+            const ph = scanResultCanvas.height * scalePt;
+            let image;
+            if (scanState.mode === 'bw') {
+                const bytes = await fetch(scanResultCanvas.toDataURL('image/png')).then(r => r.arrayBuffer());
+                image = await pdfDoc.embedPng(bytes);
+            } else {
+                const bytes = await fetch(scanResultCanvas.toDataURL('image/jpeg', 0.92)).then(r => r.arrayBuffer());
+                image = await pdfDoc.embedJpg(bytes);
+            }
+            const page = pdfDoc.addPage([pw, ph]);
+            page.drawImage(image, { x: 0, y: 0, width: pw, height: ph });
+            const bytes = await pdfDoc.save();
+            const blob = new Blob([bytes], { type: 'application/pdf' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'document_scanne.pdf';
+            a.click();
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            console.error('Scanner export PDF:', err);
+            alert('Erreur lors de la génération du PDF: ' + err.message);
+        } finally {
+            hideLoader();
+        }
+    });
+}

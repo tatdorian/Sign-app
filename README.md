@@ -35,6 +35,27 @@ Un éditeur type Word, par calque, aplati dans le PDF à l'enregistrement :
 > même endroit, en police standard. Résultat fidèle sur les PDF simples à fond
 > uni ; imparfait sur fonds colorés, images ou documents scannés (OCR non géré).
 
+## 📷 Service « Scanner »
+
+Transformez une photo de document en scan « qualité imprimante », 100 % dans
+le navigateur (aucune image n'est envoyée sur un serveur) :
+
+- **Capture** : appareil photo (mobile) ou image existante
+- **Détection automatique des coins** : réduction de bruit (flou gaussien),
+  contours de Canny, composantes connexes, enveloppe convexe réduite à
+  4 sommets — avec repli sur un cadre ajustable si la détection échoue
+- **Ajustement manuel** : 4 poignées draggables avec loupe de précision
+- **Redressement** : homographie (transformation projective) calculée à partir
+  des 4 coins, interpolation bilinéaire, ratio A4 auto-détecté
+- **Filtres « scanner »** :
+  - *Noir & blanc* : binarisation adaptative de Sauvola (images intégrales) —
+    élimine les ombres localement, fond blanc pur, encre noire profonde
+  - *Couleur* : normalisation d'illumination (division par le fond estimé) —
+    supprime les ombres en conservant les couleurs
+  - *Original* : redressement seul
+- **Sortie** : utiliser le scan directement dans Signature/Éditeur, ou
+  télécharger en PDF
+
 ## ✨ Autres caractéristiques
 
 - **PWA installable** (desktop, iOS, Android) avec une icône violette unifiée
