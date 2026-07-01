@@ -473,7 +473,8 @@ async function loadPDF(file) {
                     // réécrire exactement au même endroit / même taille
                     pdfX: item.transform[4],
                     pdfBaseline: item.transform[5],
-                    pdfSize: Math.hypot(item.transform[2], item.transform[3])
+                    pdfSize: Math.hypot(item.transform[2], item.transform[3]),
+                    pdfW: item.width || 0
                 });
             }
             state.pageTextRuns[pageNum] = runs;
@@ -2385,6 +2386,7 @@ function getPageTextLines(pageNum) {
         let str = '', prevEnd = null;
         for (const p of L.parts) {
             if (prevEnd !== null && p.cx - prevEnd > L.ch * 0.22 && !str.endsWith(' ') && !p.str.startsWith(' ')) str += ' ';
+            p.lineOffset = str.length;  // position du fragment dans la ligne
             str += p.str;
             prevEnd = p.cx + p.cw;
         }
@@ -2480,6 +2482,7 @@ function createExistingTextEdit(line, pageNum, canvas, lineKey, caretPoint) {
     const el = addEditorElement('text', 0, 0, { text: line.str });
     el.classList.add('editor-el-existing');
     el.dataset.existing = '1';
+    el._lineMeta = line;   // fragments + offsets pour l'export différentiel
     el.dataset.lineKey = lineKey || '';
     el.dataset.origPage = pageNum;
     el.dataset.origFracX = line.cx / canvas.width;
@@ -2936,9 +2939,11 @@ async function embedEditorElements(pdfDoc, pages) {
             const text = (content ? content.innerText : '').replace(/\r/g, '');
             const lines = text.split('\n');
 
-            // Texte existant modifié : masquer l'original puis réécrire aux
-            // métriques PDF NATIVES (même baseline, même taille de police) —
-            // le remplacement ne bouge pas d'un point et n'empiète pas à côté
+            // Texte existant modifié : export DIFFÉRENTIEL — le texte avant le
+            // point de modification n'est PAS touché (il garde sa police
+            // d'origine, au pixel près) ; on ne masque et ne réécrit qu'à
+            // partir du premier caractère qui change, la suite est décalée
+            // comme dans un traitement de texte.
             if (el.dataset.existing === '1') {
                 const op = parseInt(el.dataset.origPage) || pageNum;
                 if (op < 1 || op > pages.length) continue;
@@ -2948,13 +2953,6 @@ async function embedEditorElements(pdfDoc, pages) {
                 const ow = (parseFloat(el.dataset.origFracW) || 0) * os.width;
                 const oh = (parseFloat(el.dataset.origFracH) || 0) * os.height;
                 const oy = os.height - ((parseFloat(el.dataset.origFracY) || 0) * os.height) - oh;
-                opage.drawRectangle({
-                    x: ox - 2,
-                    y: oy - oh * 0.32,
-                    width: ow + 4,
-                    height: oh * 1.5,
-                    color: rgb(1, 1, 1)
-                });
 
                 // Delta si l'utilisateur a déplacé la boîte (px écran -> points PDF)
                 let dxPdf = 0, dyPdf = 0;
@@ -2969,12 +2967,82 @@ async function embedEditorElements(pdfDoc, pages) {
                     dxPdf = (curLeft - initLeft) * (os.width / ocr.width);
                     dyPdf = (curTop - initTop) * (os.height / ocr.height);
                 }
-                // Ratio si l'utilisateur a changé la taille via la barre de format
                 const initFontPx = parseFloat(el.dataset.initFontPx) || 1;
                 const curFontPx = parseFloat(el.style.fontSize) || initFontPx;
                 const drawSize = (parseFloat(el.dataset.pdfSize) || 12) * (curFontPx / initFontPx);
-                const baseX = (parseFloat(el.dataset.pdfX) || ox) + dxPdf;
                 const baseY = (parseFloat(el.dataset.pdfBaseline) || oy) - dyPdf;
+
+                const meta = el._lineMeta;
+                const untouchedBox = Math.abs(dxPdf) < 0.5 && Math.abs(dyPdf) < 0.5 &&
+                                     Math.abs(curFontPx - initFontPx) < 0.5;
+                const newText = lines.join('\n');
+
+                if (meta && untouchedBox && lines.length === 1) {
+                    const orig = meta.str;
+                    if (newText === orig) continue;   // aucun changement : ne rien toucher
+
+                    // Préfixe commun : intact dans le PDF final
+                    let p = 0;
+                    while (p < newText.length && p < orig.length && newText[p] === orig[p]) p++;
+
+                    // Position x du point de divergence (interpolation dans le
+                    // fragment d'origine via les largeurs Helvetica relatives)
+                    let xDiv;
+                    if (p >= orig.length) {
+                        const lp = meta.parts[meta.parts.length - 1];
+                        xDiv = lp.pdfX + (lp.pdfW || 0);
+                    } else {
+                        xDiv = meta.parts[0].pdfX;
+                        for (const pt of meta.parts) {
+                            const start = pt.lineOffset, end = pt.lineOffset + pt.str.length;
+                            if (p <= start) { xDiv = pt.pdfX; break; }
+                            if (p < end) {
+                                const whole = sanitizeWinAnsi(pt.str);
+                                const pre = sanitizeWinAnsi(pt.str.slice(0, p - start));
+                                let ratio = 0;
+                                try {
+                                    const wAll = helv.widthOfTextAtSize(whole || ' ', 10);
+                                    ratio = wAll > 0 ? helv.widthOfTextAtSize(pre, 10) / wAll : 0;
+                                } catch (e2) { ratio = (p - start) / Math.max(1, pt.str.length); }
+                                xDiv = pt.pdfX + (pt.pdfW || 0) * ratio;
+                                break;
+                            }
+                            xDiv = pt.pdfX + (pt.pdfW || 0);   // p après ce fragment
+                        }
+                    }
+
+                    // Masquer uniquement de xDiv à la fin de la ligne
+                    const maskR = ox + ow + 4;
+                    opage.drawRectangle({
+                        x: xDiv - 0.5,
+                        y: oy - oh * 0.32,
+                        width: Math.max(2, maskR - xDiv + 0.5),
+                        height: oh * 1.5,
+                        color: rgb(1, 1, 1)
+                    });
+                    // Réécrire le suffixe modifié à partir du point exact
+                    const suffix = sanitizeWinAnsi(newText.slice(p));
+                    if (suffix) {
+                        try {
+                            opage.drawText(suffix, {
+                                x: xDiv, y: baseY,
+                                size: drawSize, font, color: rgb(col.r, col.g, col.b)
+                            });
+                        } catch (err) { console.warn('Export texte existant:', err); }
+                    }
+                    continue;
+                }
+
+                // Boîte déplacée/redimensionnée ou multi-lignes :
+                // masque complet + réécriture complète
+                opage.drawRectangle({
+                    x: ox - 2,
+                    y: oy - oh * 0.32,
+                    width: ow + 4,
+                    height: oh * 1.5,
+                    color: rgb(1, 1, 1)
+                });
+                const baseX = (parseFloat(el.dataset.pdfX) || ox) + dxPdf;
                 const lineHpt = drawSize * 1.2;
                 for (let i = 0; i < lines.length; i++) {
                     const ln = sanitizeWinAnsi(lines[i]);
@@ -3191,6 +3259,11 @@ const scanValidateBtn = document.getElementById('scan-validate-btn');
 const scanBackBtn = document.getElementById('scan-back-btn');
 if (scanRetakeBtn) scanRetakeBtn.addEventListener('click', () => scanShowStep('capture'));
 if (scanBackBtn) scanBackBtn.addEventListener('click', () => scanShowStep('adjust'));
+
+// Reprendre la photo depuis l'étape résultat (abandonne le scan courant,
+// conserve les pages déjà ajoutées au document)
+const scanRetake2Btn = document.getElementById('scan-retake2-btn');
+if (scanRetake2Btn) scanRetake2Btn.addEventListener('click', () => scanShowStep('capture'));
 
 // Pivoter la photo de 90° (sens horaire) — le cadre suit
 const scanRotateBtn = document.getElementById('scan-rotate-btn');
@@ -3808,21 +3881,20 @@ function enhanceColor(canvas) {
     for (let i = 0; i < d.length; i += 4) {
         for (let c = 0; c < 3; c++) {
             const b = Math.max(1, bg[i + c]);
-            let v = d[i + c] / b * 252;
-            // "Levels" : point noir 60, point blanc 235 => papier blanc pur,
-            // encre dense, sans casser les couleurs
-            v = (v - 60) * (255 / 175);
+            let v = d[i + c] / b * 248;
+            // "Levels" doux : nettoie le papier sans surexposer l'image
+            v = (v - 45) * (255 / 205);
             d[i + c] = v < 0 ? 0 : v > 255 ? 255 : v;
         }
     }
-    // Accentuation (unsharp mask sur la luminance)
+    // Accentuation légère (unsharp mask sur la luminance)
     const gray = new Float32Array(n);
     for (let i = 0, j = 0; i < n; i++, j += 4) {
         gray[i] = 0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2];
     }
     const blurred = gaussianBlur5(gray, w, h);
     for (let i = 0, j = 0; i < n; i++, j += 4) {
-        const boost = 0.55 * (gray[i] - blurred[i]);
+        const boost = 0.4 * (gray[i] - blurred[i]);
         for (let c = 0; c < 3; c++) {
             const v = d[j + c] + boost;
             d[j + c] = v < 0 ? 0 : v > 255 ? 255 : v;
