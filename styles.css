@@ -1294,6 +1294,21 @@ input[type="range"]::-moz-range-thumb {
 .editor-el.selected .ed-resize,
 .editor-el.selected .ed-remove { display: flex; }
 
+/* Bouton ✓ valider pendant l'édition d'un texte */
+.editor-el .ed-confirm {
+    position: absolute; right: -11px; bottom: -11px;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: var(--green); color: #fff;
+    border: 2px solid #fff;
+    box-shadow: 0 2px 6px rgba(0,0,0,.35);
+    cursor: pointer; display: none;
+    align-items: center; justify-content: center;
+    padding: 0; z-index: 3;
+}
+.editor-el.editing .ed-confirm { display: flex; }
+.editor-el.editing .ed-resize,
+.editor-el.editing .ed-remove { display: none; }
+
 /* =============================================
    ACTIONS
    ============================================= */

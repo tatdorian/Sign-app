@@ -467,7 +467,14 @@ async function loadPDF(file) {
                 const top = tx[5] - fontHeight;
                 const width = (item.width || 0) * viewport.scale;
                 if (width < 1 || fontHeight < 1) continue;
-                runs.push({ str: item.str, cx: left, cy: top, cw: width, ch: fontHeight });
+                runs.push({
+                    str: item.str, cx: left, cy: top, cw: width, ch: fontHeight,
+                    // Métriques natives PDF (points, origine bas-gauche) pour
+                    // réécrire exactement au même endroit / même taille
+                    pdfX: item.transform[4],
+                    pdfBaseline: item.transform[5],
+                    pdfSize: Math.hypot(item.transform[2], item.transform[3])
+                });
             }
             state.pageTextRuns[pageNum] = runs;
         } catch (err) {
@@ -2382,6 +2389,13 @@ function getPageTextLines(pageNum) {
             prevEnd = p.cx + p.cw;
         }
         L.str = str;
+        // Métriques PDF de la ligne : départ du premier fragment,
+        // taille du fragment dominant (le plus grand)
+        L.pdfX = L.parts[0].pdfX;
+        let ref = L.parts[0];
+        for (const p of L.parts) if (p.pdfSize > ref.pdfSize) ref = p;
+        L.pdfBaseline = ref.pdfBaseline;
+        L.pdfSize = ref.pdfSize;
     }
     return lines;
 }
@@ -2473,6 +2487,14 @@ function createExistingTextEdit(line, pageNum, canvas, lineKey) {
     el.dataset.origFracY = line.cy / canvas.height;
     el.dataset.origFracW = line.cw / canvas.width;
     el.dataset.origFracH = line.ch / canvas.height;
+    // Métriques PDF exactes : le texte réécrit reprend la position de baseline
+    // et la taille de police d'origine (au delta de déplacement près)
+    el.dataset.pdfX = line.pdfX;
+    el.dataset.pdfBaseline = line.pdfBaseline;
+    el.dataset.pdfSize = line.pdfSize;
+    el.dataset.initLeft = left;
+    el.dataset.initTop = top;
+    el.dataset.initFontPx = fontPx;
     el.style.left = left + 'px';
     el.style.top = top + 'px';
     el.style.width = wpx + 'px';
@@ -2611,6 +2633,20 @@ function startEditingText(el) {
     selectEditor(el);
     const c = el.querySelector('.editor-text-content');
     if (!c) return;
+
+    // Bouton ✓ Valider, visible pendant l'édition (affordance claire,
+    // surtout au tactile) — cliquer à côté valide aussi
+    if (!el.querySelector('.ed-confirm')) {
+        const ok = document.createElement('button');
+        ok.className = 'ed-confirm';
+        ok.type = 'button';
+        ok.title = 'Valider le texte';
+        ok.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+        ok.addEventListener('pointerdown', ev => { ev.preventDefault(); ev.stopPropagation(); });
+        ok.addEventListener('click', ev => { ev.stopPropagation(); c.blur(); });
+        el.appendChild(ok);
+    }
+
     setTimeout(() => {
         c.focus();
         const r = document.createRange();
@@ -2619,10 +2655,25 @@ function startEditingText(el) {
         sel.removeAllRanges();
         sel.addRange(r);
     }, 0);
+
+    // Entrée = valider pour un texte existant (mono-ligne d'origine),
+    // Maj+Entrée = saut de ligne
+    const onKey = (ev) => {
+        if (ev.key === 'Enter' && !ev.shiftKey && el.dataset.existing === '1') {
+            ev.preventDefault();
+            c.blur();
+        }
+    };
+    c.addEventListener('keydown', onKey);
+
     const onBlur = () => {
         el.classList.remove('editing');
         if (!c.textContent.trim()) removeEditorEl(el);
+        // Désélectionner : la modification est validée. Sinon un Backspace
+        // ultérieur supprimerait toute la boîte (perçu comme "annulation").
+        else if (editorSelected === el) deselectEditor();
         c.removeEventListener('blur', onBlur);
+        c.removeEventListener('keydown', onKey);
     };
     c.addEventListener('blur', onBlur);
 }
@@ -2838,39 +2889,74 @@ async function embedEditorElements(pdfDoc, pages) {
                 } catch (err) { console.warn('Export image éditeur:', err); }
             }
         } else if (type === 'text') {
-            // Texte existant modifié : masquer d'abord l'original à son emplacement
-            // (marge verticale généreuse pour couvrir descendantes et accents)
-            if (el.dataset.existing === '1') {
-                const op = parseInt(el.dataset.origPage) || pageNum;
-                if (op >= 1 && op <= pages.length) {
-                    const opage = pages[op - 1];
-                    const os = opage.getSize();
-                    const ox = (parseFloat(el.dataset.origFracX) || 0) * os.width;
-                    const ow = (parseFloat(el.dataset.origFracW) || 0) * os.width;
-                    const oh = (parseFloat(el.dataset.origFracH) || 0) * os.height;
-                    const oy = os.height - ((parseFloat(el.dataset.origFracY) || 0) * os.height) - oh;
-                    opage.drawRectangle({
-                        x: ox - 2,
-                        y: oy - oh * 0.32,
-                        width: ow + 4,
-                        height: oh * 1.5,
-                        color: rgb(1, 1, 1)
-                    });
-                }
-            }
             if (!helv) {
                 helv = await pdfDoc.embedFont(StandardFonts.Helvetica);
                 helvBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
             }
             const bold = el.style.fontWeight === '700';
             const font = bold ? helvBold : helv;
-            const sizePt = (parseFloat(el.style.fontSize) || 18) * scaleX;
-            const lineH = sizePt * 1.25;
             const col = parseColor(el.style.color || '#111111');
-            const padL = 4 * scaleX, padT = 2 * scaleX;
             const content = el.querySelector('.editor-text-content');
             const text = (content ? content.innerText : '').replace(/\r/g, '');
             const lines = text.split('\n');
+
+            // Texte existant modifié : masquer l'original puis réécrire aux
+            // métriques PDF NATIVES (même baseline, même taille de police) —
+            // le remplacement ne bouge pas d'un point et n'empiète pas à côté
+            if (el.dataset.existing === '1') {
+                const op = parseInt(el.dataset.origPage) || pageNum;
+                if (op < 1 || op > pages.length) continue;
+                const opage = pages[op - 1];
+                const os = opage.getSize();
+                const ox = (parseFloat(el.dataset.origFracX) || 0) * os.width;
+                const ow = (parseFloat(el.dataset.origFracW) || 0) * os.width;
+                const oh = (parseFloat(el.dataset.origFracH) || 0) * os.height;
+                const oy = os.height - ((parseFloat(el.dataset.origFracY) || 0) * os.height) - oh;
+                opage.drawRectangle({
+                    x: ox - 2,
+                    y: oy - oh * 0.32,
+                    width: ow + 4,
+                    height: oh * 1.5,
+                    color: rgb(1, 1, 1)
+                });
+
+                // Delta si l'utilisateur a déplacé la boîte (px écran -> points PDF)
+                let dxPdf = 0, dyPdf = 0;
+                const opCont = pagesContainer ? pagesContainer.querySelector(`.pdf-page-container[data-page-number="${op}"]`) : null;
+                const opCanvas = opCont ? opCont.querySelector('.pdf-page-canvas') : documentPreview.querySelector('canvas, img');
+                if (opCanvas) {
+                    const ocr = opCanvas.getBoundingClientRect();
+                    const initLeft = parseFloat(el.dataset.initLeft) || 0;
+                    const initTop = parseFloat(el.dataset.initTop) || 0;
+                    const curLeft = parseFloat(el.style.left) || initLeft;
+                    const curTop = parseFloat(el.style.top) || initTop;
+                    dxPdf = (curLeft - initLeft) * (os.width / ocr.width);
+                    dyPdf = (curTop - initTop) * (os.height / ocr.height);
+                }
+                // Ratio si l'utilisateur a changé la taille via la barre de format
+                const initFontPx = parseFloat(el.dataset.initFontPx) || 1;
+                const curFontPx = parseFloat(el.style.fontSize) || initFontPx;
+                const drawSize = (parseFloat(el.dataset.pdfSize) || 12) * (curFontPx / initFontPx);
+                const baseX = (parseFloat(el.dataset.pdfX) || ox) + dxPdf;
+                const baseY = (parseFloat(el.dataset.pdfBaseline) || oy) - dyPdf;
+                const lineHpt = drawSize * 1.2;
+                for (let i = 0; i < lines.length; i++) {
+                    const ln = sanitizeWinAnsi(lines[i]);
+                    if (!ln) continue;
+                    try {
+                        opage.drawText(ln, {
+                            x: baseX, y: baseY - i * lineHpt,
+                            size: drawSize, font, color: rgb(col.r, col.g, col.b)
+                        });
+                    } catch (err) { console.warn('Export texte existant:', err); }
+                }
+                continue;
+            }
+
+            // Texte AJOUTÉ : position dérivée de la boîte à l'écran
+            const sizePt = (parseFloat(el.style.fontSize) || 18) * scaleX;
+            const lineH = sizePt * 1.25;
+            const padL = 4 * scaleX, padT = 2 * scaleX;
             const topBaseline = (ph - yTop) - padT - sizePt * 0.82;
             for (let i = 0; i < lines.length; i++) {
                 const ln = sanitizeWinAnsi(lines[i]);
@@ -3579,7 +3665,10 @@ function warpDocument(srcCanvas, quadNorm) {
 // puis remise à l'échelle. Divise l'image par ce fond => ombres éliminées.
 function estimateBackground(canvas) {
     const w = canvas.width, h = canvas.height;
-    const smallW = 48, smallH = Math.max(8, Math.round(smallW * h / w));
+    // Carte de fond assez fine pour suivre les ombres nettes (bords d'ombre
+    // portée) tout en restant assez grossière pour effacer le texte
+    const smallW = Math.max(64, Math.min(144, Math.round(w / 16)));
+    const smallH = Math.max(8, Math.round(smallW * h / w));
     const sm = document.createElement('canvas');
     sm.width = smallW; sm.height = smallH;
     const smctx = sm.getContext('2d');
@@ -3610,6 +3699,25 @@ function estimateBackground(canvas) {
         }
         cur = maxed;
     }
+
+    // Deux passes de flou boîte 3x3 : lisse la carte sans déborder les ombres
+    for (let pass = 0; pass < 2; pass++) {
+        const blurred = new Uint8ClampedArray(cur.length);
+        for (let y = 0; y < smallH; y++) {
+            for (let x = 0; x < smallW; x++) {
+                let sr = 0, sg = 0, sb = 0, cnt = 0;
+                for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+                    const yy = Math.min(smallH - 1, Math.max(0, y + dy));
+                    const xx = Math.min(smallW - 1, Math.max(0, x + dx));
+                    const i = (yy * smallW + xx) * 4;
+                    sr += cur[i]; sg += cur[i + 1]; sb += cur[i + 2]; cnt++;
+                }
+                const o = (y * smallW + x) * 4;
+                blurred[o] = sr / cnt; blurred[o + 1] = sg / cnt; blurred[o + 2] = sb / cnt; blurred[o + 3] = 255;
+            }
+        }
+        cur = blurred;
+    }
     sd.data.set(cur);
     smctx.putImageData(sd, 0, 0);
 
@@ -3635,8 +3743,9 @@ function enhanceColor(canvas) {
         for (let c = 0; c < 3; c++) {
             const b = Math.max(1, bg[i + c]);
             let v = d[i + c] / b * 252;
-            // Courbe de contraste (assombrit l'encre, blanchit le papier)
-            v = (v - 140) * 1.22 + 148;
+            // "Levels" : point noir 60, point blanc 235 => papier blanc pur,
+            // encre dense, sans casser les couleurs
+            v = (v - 60) * (255 / 175);
             d[i + c] = v < 0 ? 0 : v > 255 ? 255 : v;
         }
     }
@@ -3656,21 +3765,29 @@ function enhanceColor(canvas) {
     return img;
 }
 
-// Mode NOIR & BLANC: netteté + binarisation adaptative de Sauvola
-// via images intégrales (O(n), fenêtre locale => élimine les ombres)
+// Mode NOIR & BLANC "qualité scanner" en trois temps :
+// 1. normalisation par le fond estimé -> ombres et reflets ÉLIMINÉS
+// 2. accentuation du texte (unsharp mask)
+// 3. binarisation adaptative de Sauvola (images intégrales) + despeckle
 function enhanceBW(canvas) {
     const w = canvas.width, h = canvas.height;
     const img = canvas.getContext('2d').getImageData(0, 0, w, h);
     const d = img.data;
     const n = w * h;
 
-    // Niveaux de gris
+    // 1. Gris normalisé par l'illumination : gray = 255 * pixel / fond.
+    // Une ombre assombrit le pixel ET le fond estimé de la même façon,
+    // le rapport reste ~1 => le papier ombré devient blanc uniforme.
+    const bg = estimateBackground(canvas);
     let gray = new Float32Array(n);
     for (let i = 0, j = 0; i < n; i++, j += 4) {
-        gray[i] = 0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2];
+        const lum = 0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2];
+        const bgLum = Math.max(1, 0.299 * bg[j] + 0.587 * bg[j + 1] + 0.114 * bg[j + 2]);
+        const v = 255 * lum / bgLum;
+        gray[i] = v > 255 ? 255 : v;
     }
 
-    // Accentuation (unsharp mask léger) avant seuillage
+    // 2. Accentuation (unsharp mask) avant seuillage
     const blurred = gaussianBlur5(gray, w, h);
     for (let i = 0; i < n; i++) {
         const v = gray[i] + 0.7 * (gray[i] - blurred[i]);
@@ -3708,7 +3825,11 @@ function enhanceBW(canvas) {
             const mean = sum / area;
             const variance = Math.max(0, sum2 / area - mean * mean);
             const T = mean * (1 + k * (Math.sqrt(variance) / R - 1));
-            bin[y * w + x] = gray[y * w + x] > T ? 1 : 0;
+            // Sur image normalisée le papier est ~blanc : un pixel n'est de
+            // l'encre que s'il est sous le seuil local ET réellement sombre
+            // (élimine les halos résiduels aux bords d'ombre nets)
+            const g = gray[y * w + x];
+            bin[y * w + x] = (g > T || g > 185) ? 1 : 0;
         }
     }
 
