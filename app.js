@@ -3412,30 +3412,261 @@ function detectDocumentQuad(srcCanvas) {
             if (q) candidates.push(q);
         }
 
-        // Stratégie 2 — segmentation d'Otsu : le document est généralement la
-        // grande région CLAIRE de la photo. Robuste quand les bords de Canny
-        // sont coupés (faible contraste local, doigt sur le bord…).
+        // Stratégie 2 — segmentation d'Otsu sur DEUX canaux :
+        // le gris (document = grande région claire) et le canal "papier"
+        // (clair ET peu saturé — sépare une feuille d'un fond coloré de
+        // luminosité proche : bois, nappe…)
+        const paper = new Float32Array(w * h);
+        for (let i = 0, j = 0; i < paper.length; i++, j += 4) {
+            const r = data[j], g = data[j + 1], b = data[j + 2];
+            const sat = Math.max(r, g, b) - Math.min(r, g, b);
+            paper[i] = 0.55 * gray[i] + 0.45 * (255 - sat);
+        }
         const otsuQuad = quadFromBrightRegion(gray, w, h);
         if (otsuQuad) candidates.push(otsuQuad);
+        const paperQuad = quadFromBrightRegion(paper, w, h);
+        if (paperQuad) candidates.push(paperQuad);
 
-        // Sélection : angles plausibles + score aire × adhérence aux gradients
+        // Stratégie 3 — transformée de Hough : les 4 bords en tant que droites
+        // dominantes. Robuste aux coins masqués (doigt) et aux bords interrompus.
+        const houghThr = sample[Math.floor(sample.length * 0.5)];
+        for (const q of houghQuadCandidates(nms, w, h, houghThr)) candidates.push(q);
+
+        // Sélection : angles plausibles + score composite
+        // (aire, adhérence aux gradients, contraste intérieur/extérieur)
         let best = null, bestScore = 0;
-        const totalArea = w * h;
         for (const q of candidates) {
-            if (!quadAnglesOk(q)) continue;
-            const areaRatio = polygonArea(q) / totalArea;
-            if (areaRatio < 0.15 || areaRatio > 0.99) continue;
-            const support = quadEdgeSupport(q, nms, w, h, supportThr);
-            const score = areaRatio * (0.35 + support);
+            const score = scoreQuadCandidate(q, nms, gray, w, h, supportThr);
             if (score > bestScore) { bestScore = score; best = q; }
         }
-
         if (!best) return null;
+
+        // Raffinement sub-pixel : chaque bord s'aimante sur la crête de
+        // gradient locale, puis les coins sont recalculés par intersection
+        best = refineQuadEdges(best, mag, w, h);
+
         return orderQuad(best.map(p => ({ x: p[0] / w, y: p[1] / h })));
     } catch (err) {
         console.warn('Détection coins:', err);
         return null;
     }
+}
+
+// Score composite d'un quad candidat
+function scoreQuadCandidate(q, nms, gray, w, h, supportThr) {
+    if (!quadAnglesOk(q)) return 0;
+    const areaRatio = polygonArea(q) / (w * h);
+    if (areaRatio < 0.12 || areaRatio > 1.02) return 0;
+    const support = quadEdgeSupport(q, nms, w, h, supportThr);
+    const contrast = quadInsideOutsideContrast(q, gray, w, h);   // 0..1
+    return Math.pow(areaRatio, 0.6) * (0.25 + support) * (0.55 + 0.45 * contrast);
+}
+
+// L'intérieur d'un document est plus clair que l'extérieur (0..1, 0.5 neutre)
+function quadInsideOutsideContrast(q, gray, w, h) {
+    // Signes des produits vectoriels constants => point dans le quad convexe
+    const inside = (x, y) => {
+        let sign = 0;
+        for (let i = 0; i < 4; i++) {
+            const a = q[i], b = q[(i + 1) % 4];
+            const c = (b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0]);
+            if (c === 0) continue;
+            const s = c > 0 ? 1 : -1;
+            if (!sign) sign = s;
+            else if (s !== sign) return false;
+        }
+        return true;
+    };
+    let sumIn = 0, nIn = 0, sumOut = 0, nOut = 0;
+    const step = Math.max(4, Math.round(Math.min(w, h) / 40));
+    for (let y = 2; y < h - 2; y += step) {
+        for (let x = 2; x < w - 2; x += step) {
+            const g = gray[y * w + x];
+            if (inside(x, y)) { sumIn += g; nIn++; }
+            else { sumOut += g; nOut++; }
+        }
+    }
+    if (nIn < 8 || nOut < 8) return 0.5;
+    const diff = (sumIn / nIn) - (sumOut / nOut);
+    const c = Math.max(-1, Math.min(1, diff / 60));
+    return (c + 1) / 2;
+}
+
+// Transformée de Hough -> quads candidats par intersections de droites
+function houghQuadCandidates(nms, w, h, thr) {
+    const pts = [];
+    for (let y = 2; y < h - 2; y++) {
+        for (let x = 2; x < w - 2; x++) {
+            if (nms[y * w + x] >= thr) pts.push(x, y);
+        }
+    }
+    const nPts = pts.length / 2;
+    if (nPts < 60) return [];
+    const step = Math.max(1, Math.floor(nPts / 4000));
+
+    const thetaSteps = 120;                       // pas de 1,5°
+    const diag = Math.hypot(w, h);
+    // Bins rho larges : concentre les votes des bords légèrement inclinés
+    // (sinon les lignes de texte, parfaitement horizontales, dominent)
+    const rhoStep = 3;
+    const rhoOff = Math.ceil(diag / rhoStep);     // rho peut être négatif
+    const rhoBins = rhoOff * 2 + 1;
+    const acc = new Int32Array(thetaSteps * rhoBins);
+    const cosT = new Float32Array(thetaSteps), sinT = new Float32Array(thetaSteps);
+    for (let t = 0; t < thetaSteps; t++) {
+        const a = t * Math.PI / thetaSteps;
+        cosT[t] = Math.cos(a); sinT[t] = Math.sin(a);
+    }
+    for (let i = 0; i < nPts; i += step) {
+        const x = pts[i * 2], y = pts[i * 2 + 1];
+        for (let t = 0; t < thetaSteps; t++) {
+            const r = Math.round((x * cosT[t] + y * sinT[t]) / rhoStep) + rhoOff;
+            acc[t * rhoBins + r]++;
+        }
+    }
+
+    // Pics avec suppression locale (±4 bins theta, ±6 bins rho)
+    let maxVotes = 0;
+    for (let i = 0; i < acc.length; i++) if (acc[i] > maxVotes) maxVotes = acc[i];
+    const minVotes = Math.max(20, maxVotes * 0.12);
+    const lines = [];
+    const used = new Uint8Array(acc.length);
+    for (let pick = 0; pick < 24; pick++) {
+        let bi = -1, bv = minVotes - 1;
+        for (let i = 0; i < acc.length; i++) {
+            if (!used[i] && acc[i] > bv) { bv = acc[i]; bi = i; }
+        }
+        if (bi < 0) break;
+        const t = (bi / rhoBins) | 0, r = bi % rhoBins;
+        lines.push({ theta: t * Math.PI / thetaSteps, rho: (r - rhoOff) * rhoStep, votes: bv });
+        for (let dt = -4; dt <= 4; dt++) {
+            // theta est circulaire modulo 180° (rho change de signe)
+            let tt = t + dt, rr0 = r;
+            if (tt < 0) { tt += thetaSteps; rr0 = rhoBins - 1 - r; }
+            if (tt >= thetaSteps) { tt -= thetaSteps; rr0 = rhoBins - 1 - r; }
+            for (let dr = -6; dr <= 6; dr++) {
+                const rr = rr0 + dr;
+                if (rr >= 0 && rr < rhoBins) used[tt * rhoBins + rr] = 1;
+            }
+        }
+    }
+    houghQuadCandidates._lastLines = lines;   // introspection (tests/diagnostic)
+    if (lines.length < 4) return [];
+
+    // Paires de droites ~parallèles suffisamment écartées
+    const angDist = (a, b) => {
+        let d = Math.abs(a - b) % Math.PI;
+        return Math.min(d, Math.PI - d);
+    };
+    const pairs = [];
+    for (let i = 0; i < lines.length; i++) {
+        for (let j = i + 1; j < lines.length; j++) {
+            if (angDist(lines[i].theta, lines[j].theta) > 0.5) continue;   // ~28°
+            if (Math.abs(Math.abs(lines[i].rho) - Math.abs(lines[j].rho)) < Math.min(w, h) * 0.25) continue;
+            pairs.push([lines[i], lines[j]]);
+        }
+    }
+
+    // Intersection de deux droites (theta, rho)
+    const inter = (l1, l2) => {
+        const d = Math.sin(l2.theta - l1.theta);
+        if (Math.abs(d) < 1e-6) return null;
+        const x = (l1.rho * Math.sin(l2.theta) - l2.rho * Math.sin(l1.theta)) / d;
+        const y = (l2.rho * Math.cos(l1.theta) - l1.rho * Math.cos(l2.theta)) / d;
+        return [x, y];
+    };
+
+    const quads = [];
+    const m = 18;   // marge hors cadre tolérée (coins coupés par le cadrage)
+    for (let a = 0; a < pairs.length && quads.length < 160; a++) {
+        for (let b = a + 1; b < pairs.length && quads.length < 160; b++) {
+            const [A1, A2] = pairs[a], [B1, B2] = pairs[b];
+            if (A1 === B1 || A1 === B2 || A2 === B1 || A2 === B2) continue;
+            // Croisement des familles : min des distances angulaires entre
+            // combinaisons (la moyenne naïve échoue au passage 0°/180°)
+            const cross = Math.min(
+                angDist(A1.theta, B1.theta), angDist(A1.theta, B2.theta),
+                angDist(A2.theta, B1.theta), angDist(A2.theta, B2.theta)
+            );
+            if (cross < 0.87) continue;   // familles à ~50° minimum
+            const c1 = inter(A1, B1), c2 = inter(A1, B2), c3 = inter(A2, B2), c4 = inter(A2, B1);
+            if (!c1 || !c2 || !c3 || !c4) continue;
+            const quad = [c1, c2, c3, c4];
+            let ok = true;
+            for (const c of quad) {
+                if (c[0] < -m || c[0] > w + m || c[1] < -m || c[1] > h + m) { ok = false; break; }
+            }
+            if (ok) quads.push(quad);
+        }
+    }
+    return quads;
+}
+
+// Raffinement : aimante chaque bord sur la crête de gradient la plus proche,
+// ajuste une droite (moindres carrés totaux), recalcule les coins
+function refineQuadEdges(quad, mag, w, h) {
+    const sampleMag = (x, y) => {
+        if (x < 0 || y < 0 || x > w - 2 || y > h - 2) return 0;
+        const x0 = x | 0, y0 = y | 0, fx = x - x0, fy = y - y0;
+        const i = y0 * w + x0;
+        return mag[i] * (1 - fx) * (1 - fy) + mag[i + 1] * fx * (1 - fy)
+             + mag[i + w] * (1 - fx) * fy + mag[i + w + 1] * fx * fy;
+    };
+    let corners = quad.map(p => [p[0], p[1]]);
+
+    for (let iter = 0; iter < 2; iter++) {
+        const edgeLines = [];
+        for (let e = 0; e < 4; e++) {
+            const a = corners[e], b = corners[(e + 1) % 4];
+            const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+            if (len < 12) return quad;
+            const nx = -(b[1] - a[1]) / len, ny = (b[0] - a[0]) / len;
+            const fit = [];
+            for (let k = 2; k <= 12; k++) {
+                const t = k / 14;
+                const px = a[0] + (b[0] - a[0]) * t;
+                const py = a[1] + (b[1] - a[1]) * t;
+                let bestS = 0, bestV = -1;
+                for (let sd = -5; sd <= 5; sd += 0.5) {
+                    const v = sampleMag(px + nx * sd, py + ny * sd);
+                    if (v > bestV) { bestV = v; bestS = sd; }
+                }
+                if (bestV > 10) fit.push([px + nx * bestS, py + ny * bestS]);
+            }
+            if (fit.length >= 5) {
+                // Moindres carrés totaux : point moyen + direction principale
+                let mx = 0, my = 0;
+                for (const p of fit) { mx += p[0]; my += p[1]; }
+                mx /= fit.length; my /= fit.length;
+                let sxx = 0, sxy = 0, syy = 0;
+                for (const p of fit) {
+                    const dx = p[0] - mx, dy = p[1] - my;
+                    sxx += dx * dx; sxy += dx * dy; syy += dy * dy;
+                }
+                const ang = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+                edgeLines.push({ px: mx, py: my, dx: Math.cos(ang), dy: Math.sin(ang) });
+            } else {
+                edgeLines.push({ px: a[0], py: a[1], dx: (b[0] - a[0]) / len, dy: (b[1] - a[1]) / len });
+            }
+        }
+        // Coins = intersections des bords adjacents (coin e : bords e-1 et e)
+        const next = [];
+        for (let e = 0; e < 4; e++) {
+            const l1 = edgeLines[(e + 3) % 4], l2 = edgeLines[e];
+            const det = l1.dx * l2.dy - l1.dy * l2.dx;
+            if (Math.abs(det) < 1e-6) { next.push(corners[e]); continue; }
+            const t = ((l2.px - l1.px) * l2.dy - (l2.py - l1.py) * l2.dx) / det;
+            const ix = l1.px + l1.dx * t, iy = l1.py + l1.dy * t;
+            // Garde-fou : un coin raffiné ne doit pas s'éloigner de plus de 12px
+            if (Math.hypot(ix - corners[e][0], iy - corners[e][1]) > 12) next.push(corners[e]);
+            else next.push([ix, iy]);
+        }
+        corners = next;
+    }
+    return corners.map(c => [
+        Math.min(w - 1, Math.max(0, c[0])),
+        Math.min(h - 1, Math.max(0, c[1]))
+    ]);
 }
 
 // Segmentation de la région claire (Otsu) -> plus grande composante -> quad
@@ -3509,13 +3740,16 @@ function quadAnglesOk(quad) {
     return true;
 }
 
-// Fraction du périmètre du quad posée sur un gradient fort
+// Adhérence du quad aux gradients, robuste à l'occlusion : le support est
+// calculé PAR BORD, puis pondéré en faveur des 3 meilleurs bords — un doigt
+// qui masque un coin ne disqualifie plus le bon quadrilatère
 function quadEdgeSupport(quad, nms, w, h, thr) {
-    let hit = 0, tot = 0;
+    const edgeSupports = [];
     for (let e = 0; e < 4; e++) {
         const a = quad[e], b = quad[(e + 1) % 4];
         const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
         const steps = Math.max(8, Math.round(len / 2));
+        let hit = 0, tot = 0;
         for (let s = 0; s <= steps; s++) {
             const t = s / steps;
             const x = Math.round(a[0] + (b[0] - a[0]) * t);
@@ -3531,8 +3765,11 @@ function quadEdgeSupport(quad, nms, w, h, thr) {
             }
             hit += found;
         }
+        edgeSupports.push(tot ? hit / tot : 0);
     }
-    return tot ? hit / tot : 0;
+    edgeSupports.sort((a, b) => a - b);
+    return 0.8 * (edgeSupports[1] + edgeSupports[2] + edgeSupports[3]) / 3
+         + 0.2 * edgeSupports[0];
 }
 
 // Hystérésis + composantes connexes + enveloppe convexe -> meilleur quad

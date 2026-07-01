@@ -42,10 +42,14 @@ Transformez une photo de document en scan « qualité imprimante », 100 % dans
 le navigateur (aucune image n'est envoyée sur un serveur) :
 
 - **Capture** : appareil photo (mobile) ou image existante
-- **Détection automatique des coins** (deux stratégies combinées) : contours
-  de Canny multi-seuils + segmentation d'Otsu de la région claire, enveloppe
-  convexe réduite à 4 sommets, sélection par score (aire × adhérence aux
-  gradients, angles plausibles) — repli sur un cadre ajustable si besoin
+- **Détection automatique des coins** (trois stratégies combinées) :
+  contours de Canny multi-seuils, segmentation d'Otsu (gris + canal
+  « papier » clair et peu saturé), et transformée de Hough (bords en tant
+  que droites dominantes — reconstruit les coins masqués par un doigt) ;
+  sélection par score composite (aire, adhérence aux gradients robuste à
+  l'occlusion, contraste intérieur/extérieur) puis **raffinement
+  sub-pixel** des coins (aimantation des bords sur les crêtes de gradient,
+  moindres carrés, intersections) — repli sur un cadre ajustable si besoin
 - **Ajustement manuel** : 4 poignées draggables avec loupe de précision
 - **Redressement** : homographie (transformation projective) calculée à partir
   des 4 coins, interpolation bilinéaire, ratio A4 auto-détecté
