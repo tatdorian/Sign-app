@@ -1,5 +1,5 @@
 {
-  "name": "Signature - Signez vos documents",
+  "name": "Application de signature",
   "short_name": "Signature",
   "description": "Application de signature de documents PDF avec surligneur. Fonctionne hors ligne.",
   "start_url": "./index.html",
@@ -7,7 +7,7 @@
   "display": "standalone",
   "orientation": "any",
   "background_color": "#f2f2f7",
-  "theme_color": "#007AFF",
+  "theme_color": "#7C3AED",
   "lang": "fr",
   "dir": "ltr",
   "categories": ["productivity", "business", "utilities"],

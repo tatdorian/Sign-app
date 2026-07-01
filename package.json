@@ -1,7 +1,7 @@
 {
-  "name": "document-signature-app",
+  "name": "application-de-signature",
   "version": "1.0.0",
-  "description": "Application web pour signer des documents et les envoyer par email ou les télécharger en PDF",
+  "description": "Application de signature de documents avec téléchargement en PDF",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -13,7 +13,6 @@
     "signature",
     "pdf",
     "document",
-    "email",
     "signing",
     "vercel"
   ],
@@ -23,9 +22,7 @@
     "node": ">=18.x"
   },
   "dependencies": {
-    "cors": "^2.8.5",
-    "express": "^4.18.2",
-    "nodemailer": "^6.9.7"
+    "express": "^4.18.2"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
