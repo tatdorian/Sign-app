@@ -1217,6 +1217,22 @@ input[type="range"]::-moz-range-thumb {
     outline-offset: 0;
 }
 
+/* Vue "diff" d'une ligne validée : seul le segment modifié reste couvert */
+.editor-el .ed-diff-suffix {
+    position: absolute;
+    top: 0;
+    background: #ffffff;
+    white-space: pre;
+    line-height: inherit;
+    pointer-events: none;
+    display: inline-block;
+}
+.editor-el.ed-committed { border-color: transparent; }
+.editor-el.ed-committed:hover,
+.editor-el.ed-committed.selected {
+    border-color: var(--blue);
+}
+
 /* Cibles cliquables sur les lignes de texte du PDF (mode Modifier texte) */
 .edit-text-target {
     position: absolute;
