@@ -227,6 +227,10 @@
                             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l7.5 18 2.5-7 7-2.5z"/></svg>
                             <span>Sélection</span>
                         </button>
+                        <button class="ed-tool" data-ed-tool="edit-text" title="Modifier le texte existant du PDF">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/><path d="M4 7V4h7"/></svg>
+                            <span>Modifier texte</span>
+                        </button>
                         <button class="ed-tool" data-ed-tool="text" title="Ajouter du texte">
                             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>
                             <span>Texte</span>
@@ -263,7 +267,7 @@
                         </button>
                     </div>
                     <button class="editor-clear" id="editor-clear">Tout effacer</button>
-                    <p class="editor-hint">Choisissez un outil puis cliquez sur le document. Double-clic pour éditer un texte.</p>
+                    <p class="editor-hint">Choisissez un outil puis cliquez sur le document. « Modifier texte » : cliquez sur un texte du PDF pour le retaper (fonctionne mieux sur fond uni). Double-clic pour rééditer un texte ajouté.</p>
                     <input type="file" id="editor-image-input" accept="image/*" hidden>
                 </div>
 

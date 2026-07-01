@@ -20,6 +20,8 @@ en haut de l'écran :
 
 Un éditeur type Word, par calque, aplati dans le PDF à l'enregistrement :
 
+- **Modifier texte** : cliquez sur un texte existant du PDF pour le retaper —
+  l'original est masqué et remplacé à l'export (best-effort, voir remarque)
 - **Texte** : ajoutez des zones de texte éditables (couleur, taille, gras)
 - **Image** : insérez des images, déplaçables et redimensionnables
 - **Forme** : ajoutez des rectangles
@@ -27,9 +29,11 @@ Un éditeur type Word, par calque, aplati dans le PDF à l'enregistrement :
 - **Déplacement / redimensionnement / suppression** de chaque élément
 - **Export** : tout est aplati dans un PDF téléchargeable
 
-> Remarque : l'édition se fait par ajout d'éléments par-dessus le PDF (comme les
-> éditeurs PDF légers). Le texte déjà présent dans le PDF d'origine n'est pas
-> re-dactylographié : on le recouvre avec l'outil « Cache » puis on écrit dessus.
+> Remarque sur « Modifier texte » : un PDF ne stocke pas des paragraphes
+> rééditables mais des glyphes positionnés. La modification fonctionne donc en
+> recouvrant l'original (rectangle blanc) et en redessinant le nouveau texte au
+> même endroit, en police standard. Résultat fidèle sur les PDF simples à fond
+> uni ; imparfait sur fonds colorés, images ou documents scannés (OCR non géré).
 
 ## ✨ Autres caractéristiques
 
