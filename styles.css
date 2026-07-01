@@ -2,14 +2,18 @@
    DESIGN APPLE — Variables
    ============================================= */
 :root {
-    /* Couleurs système Apple (clair) */
-    --blue:        #007AFF;
-    --blue-hover:  #0066d6;
+    /* Accent principal — violet moderne */
+    --blue:        #7C3AED;
+    --blue-hover:  #6D28D9;
     --green:       #34C759;
     --red:         #FF3B30;
     --orange:      #FF9500;
     --yellow:      #FFD60A;
-    --purple:      #AF52DE;
+    --purple:      #8B5CF6;
+
+    /* Dégradé de marque (logo, icônes, accents) */
+    --brand-grad:  linear-gradient(135deg, #A855F7 0%, #8B5CF6 55%, #6D28D9 100%);
+    --brand-grad-soft: linear-gradient(135deg, #8B5CF6, #6D28D9);
 
     /* Couches de gris */
     --gray-1: #8e8e93;
@@ -31,7 +35,7 @@
     --bg-card:     #ffffff;
     --bg-subtle:   #f2f2f7;
     --bg-input:    rgba(120, 120, 128, 0.12);
-    --bg-selected: rgba(0, 122, 255, 0.10);
+    --bg-selected: rgba(124, 58, 237, 0.10);
 
     /* Ombres */
     --shadow-sm: 0 1px 0 rgba(0,0,0,.04), 0 1px 4px rgba(0,0,0,.06);
@@ -46,17 +50,18 @@
     /* Transition */
     --t: 200ms cubic-bezier(.4,0,.2,1);
 
-    /* Blue tint surface */
-    --blue-surface: rgba(0, 122, 255, 0.10);
+    /* Accent tint surface */
+    --blue-surface: rgba(124, 58, 237, 0.10);
 }
 
 /* Mode sombre */
 [data-theme="dark"] {
-    --blue:      #0A84FF;
-    --blue-hover:#2593ff;
+    --blue:      #A78BFA;
+    --blue-hover:#8B5CF6;
     --green:     #30D158;
     --red:       #FF453A;
     --orange:    #FF9F0A;
+    --purple:    #A78BFA;
 
     --gray-1: #8e8e93;
     --gray-2: #636366;
@@ -75,12 +80,12 @@
     --bg-card:  #1c1c1e;
     --bg-subtle:#2c2c2e;
     --bg-input: rgba(120,120,128,.24);
-    --bg-selected: rgba(10, 132, 255, 0.18);
+    --bg-selected: rgba(167, 139, 250, 0.20);
 
     --shadow-sm: 0 1px 0 rgba(0,0,0,.3);
     --shadow:    0 2px 8px rgba(0,0,0,.5), 0 0 0 .5px rgba(255,255,255,.06);
 
-    --blue-surface: rgba(10, 132, 255, 0.15);
+    --blue-surface: rgba(167, 139, 250, 0.18);
 }
 
 /* =============================================
@@ -164,10 +169,10 @@ body {
     border: none; border-radius: 980px;
     font-family: inherit; font-size: .82em; font-weight: 600;
     cursor: pointer; z-index: 100;
-    box-shadow: 0 4px 14px rgba(0,122,255,.4);
+    box-shadow: 0 4px 14px rgba(124,58,237,.4);
     transition: transform var(--t), box-shadow var(--t);
 }
-.install-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,122,255,.5); }
+.install-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(124,58,237,.5); }
 .install-btn:active { transform: scale(.96); }
 
 /* Indicateur hors ligne */
@@ -204,7 +209,7 @@ body {
 }
 .ios-safari-banner-icon {
     width: 40px; height: 40px; flex-shrink: 0;
-    background: linear-gradient(135deg, #0A84FF, #0066d6);
+    background: var(--brand-grad-soft);
     border-radius: 10px;
     display: flex; align-items: center; justify-content: center;
     color: #fff;
@@ -274,12 +279,12 @@ body {
 }
 .ios-install-icon {
     width: 56px; height: 56px;
-    background: linear-gradient(135deg, #0A84FF, #0066d6);
+    background: var(--brand-grad-soft);
     border-radius: 14px;
     display: flex; align-items: center; justify-content: center;
     color: #fff;
     margin: 0 auto 16px;
-    box-shadow: 0 4px 16px rgba(0,122,255,.3);
+    box-shadow: 0 4px 16px rgba(124,58,237,.3);
 }
 .ios-install-title {
     text-align: center; font-size: 1.2em; font-weight: 700;
@@ -345,22 +350,26 @@ header { margin-bottom: 24px; }
 .brand { display: flex; align-items: center; gap: 12px; }
 
 .brand-mark {
-    width: 42px; height: 42px;
-    border-radius: 11px;
-    background: var(--blue);
+    width: 46px; height: 46px;
+    border-radius: 13px;
+    background: var(--brand-grad);
     display: flex; align-items: center; justify-content: center;
     color: #fff;
-    box-shadow: 0 4px 12px rgba(0,122,255,.35);
+    box-shadow: 0 6px 18px rgba(124,58,237,.4);
     flex-shrink: 0;
 }
-.brand-mark svg { width: 20px; height: 20px; }
+.brand-mark svg { width: 46px; height: 46px; border-radius: 13px; }
 
 .brand-text h1 {
-    font-size: 1.4em;
+    font-size: 1.35em;
     font-weight: 700;
     letter-spacing: -.03em;
     color: var(--label);
-    line-height: 1.1;
+    line-height: 1.12;
+    background: var(--brand-grad);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
 }
 .subtitle {
     font-size: .8em;
@@ -493,11 +502,17 @@ main { display: flex; flex-direction: column; gap: 14px; }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 .btn svg { flex-shrink: 0; }
 
-.btn-primary { background: var(--blue); color: #fff; }
-.btn-primary:hover { background: var(--blue-hover); }
+.btn-primary {
+    background: var(--brand-grad-soft); color: #fff;
+    box-shadow: 0 4px 14px rgba(124,58,237,.35);
+}
+.btn-primary:hover { filter: brightness(1.06); box-shadow: 0 6px 18px rgba(124,58,237,.45); }
 
-.btn-success { background: var(--green); color: #fff; }
-.btn-success:hover { filter: brightness(.92); }
+.btn-success {
+    background: linear-gradient(135deg, #34C759, #248A3D); color: #fff;
+    box-shadow: 0 4px 14px rgba(52,199,89,.35);
+}
+.btn-success:hover { filter: brightness(1.05); box-shadow: 0 6px 18px rgba(52,199,89,.45); }
 
 .btn-secondary {
     background: var(--bg-input);
@@ -896,10 +911,10 @@ input[type="range"]::-moz-range-thumb {
     cursor: move;
     border: 1.5px dashed var(--blue);
     border-radius: 6px;
-    background: rgba(255,255,255,.9);
+    background: transparent;
     padding: 3px;
-    box-shadow: 0 4px 16px rgba(0,122,255,.2);
-    transition: box-shadow var(--t);
+    box-shadow: none;
+    transition: box-shadow var(--t), border-color var(--t);
     pointer-events: auto;
     z-index: 10;
     touch-action: none;
@@ -912,7 +927,7 @@ input[type="range"]::-moz-range-thumb {
 }
 .signature-draggable:active {
     cursor: grabbing;
-    box-shadow: 0 8px 28px rgba(0,122,255,.4);
+    box-shadow: 0 8px 28px rgba(124,58,237,.4);
 }
 .signature-hint {
     position: absolute; bottom: -26px; left: 50%;
@@ -928,46 +943,7 @@ input[type="range"]::-moz-range-thumb {
    ACTIONS
    ============================================= */
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.actions .btn { flex: 1; min-width: 130px; padding: 13px 20px; font-size: .9em; }
-
-/* =============================================
-   EMAIL FORM
-   ============================================= */
-.email-form {
-    margin-top: 14px; padding: 16px;
-    background: var(--bg-subtle); border-radius: var(--r);
-    display: flex; flex-direction: column; gap: 9px;
-}
-.email-form h3 { font-size: .95em; font-weight: 600; margin-bottom: 2px; }
-
-.email-form input,
-.email-form textarea {
-    width: 100%;
-    padding: 10px 13px;
-    border: 1px solid var(--separator-strong);
-    border-radius: var(--r-sm);
-    background: var(--bg-card);
-    color: var(--label);
-    font-family: inherit; font-size: .9em;
-    transition: border-color var(--t), box-shadow var(--t);
-    resize: vertical;
-}
-.email-form input:focus, .email-form textarea:focus {
-    outline: none;
-    border-color: var(--blue);
-    box-shadow: 0 0 0 3px var(--blue-surface);
-}
-.email-form input::placeholder, .email-form textarea::placeholder { color: var(--label-3); }
-
-.form-actions { display: flex; gap: 7px; margin-top: 2px; }
-.form-actions .btn { flex: 1; }
-
-.status-message {
-    padding: 9px 13px; border-radius: var(--r-sm);
-    font-size: .85em; font-weight: 500; display: none;
-}
-.status-message.success { display: block; background: rgba(52,199,89,.12); color: var(--green); }
-.status-message.error   { display: block; background: rgba(255,59,48,.1);  color: var(--red);   }
+.actions .btn { flex: 1; min-width: 130px; padding: 15px 22px; font-size: .95em; }
 
 /* =============================================
    FOOTER
@@ -1019,8 +995,6 @@ footer {
 
     input[type="range"]::-webkit-slider-thumb { width: 22px; height: 22px; }
     input[type="range"]::-moz-range-thumb { width: 22px; height: 22px; }
-
-    .email-form input, .email-form textarea { font-size: 16px; }
 
     .theme-toggle { top: 10px; right: 10px; width: 34px; height: 34px; font-size: 15px; }
 

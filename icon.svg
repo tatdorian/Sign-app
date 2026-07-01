@@ -2,21 +2,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
     <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#1C6EF2"/>
-      <stop offset="100%" stop-color="#7B2FF7"/>
+      <stop offset="0%" stop-color="#A855F7"/>
+      <stop offset="55%" stop-color="#8B5CF6"/>
+      <stop offset="100%" stop-color="#6D28D9"/>
     </linearGradient>
     <linearGradient id="shine" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="rgba(255,255,255,0.16)"/>
+      <stop offset="0%" stop-color="rgba(255,255,255,0.22)"/>
       <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
     </linearGradient>
   </defs>
   <!-- Background -->
-  <rect width="512" height="512" rx="108" fill="url(#bg)"/>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
   <!-- Top gloss -->
-  <rect width="512" height="260" rx="108" fill="url(#shine)"/>
+  <rect width="512" height="270" rx="112" fill="url(#shine)"/>
   <!-- Signature wave -->
   <path d="M88 280 C108 218,132 312,162 264 C192 216,206 294,236 260 C266 226,282 300,318 260 C354 220,374 278,424 252"
-    fill="none" stroke="white" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+    fill="none" stroke="white" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
   <!-- Underline -->
-  <line x1="88" y1="338" x2="424" y2="338" stroke="white" stroke-width="20" stroke-linecap="round" opacity="0.45"/>
+  <line x1="88" y1="338" x2="424" y2="338" stroke="white" stroke-width="20" stroke-linecap="round" opacity="0.5"/>
 </svg>

@@ -2,7 +2,7 @@
 // SERVICE WORKER - Signature App PWA
 // Strategie cache-first avec mise a jour reseau
 // =============================================
-const VERSION = 'sig-app-v3';
+const VERSION = 'sig-app-v4';
 const CACHE_STATIC = `${VERSION}-static`;
 const CACHE_RUNTIME = `${VERSION}-runtime`;
 
@@ -60,36 +60,16 @@ self.addEventListener('activate', event => {
 
 // =============================================
 // FETCH : cache-first avec fallback reseau
-// Pour API (POST email): network-first
 // =============================================
 self.addEventListener('fetch', event => {
     const { request } = event;
     const url = new URL(request.url);
 
-    // Ignorer les requetes non-GET (POST email, etc.)
+    // Ignorer les requetes non-GET
     if (request.method !== 'GET') return;
 
     // Ignorer les schemes non-http (chrome-extension, etc.)
     if (!url.protocol.startsWith('http')) return;
-
-    // Envoi email : network-first (donnees dynamiques)
-    const isAPI = url.pathname.includes('/api/') ||
-                  url.pathname.includes('send-email');
-
-    if (isAPI) {
-        event.respondWith(
-            fetch(request)
-                .then(resp => {
-                    if (resp && resp.ok) {
-                        const copy = resp.clone();
-                        caches.open(CACHE_RUNTIME).then(c => c.put(request, copy));
-                    }
-                    return resp;
-                })
-                .catch(() => caches.match(request))
-        );
-        return;
-    }
 
     // Static / CDN : cache-first
     event.respondWith(

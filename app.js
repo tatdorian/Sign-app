@@ -55,10 +55,6 @@ const parapheColorInput = document.getElementById('paraphe-color');
 const parapheWidthInput = document.getElementById('paraphe-width');
 
 const downloadBtn = document.getElementById('download-btn');
-const emailBtn = document.getElementById('email-btn');
-const emailForm = document.getElementById('email-form');
-const sendEmailBtn = document.getElementById('send-email-btn');
-const cancelEmailBtn = document.getElementById('cancel-email-btn');
 
 // Configuration du canvas
 ctx.lineJoin = 'round';
@@ -913,12 +909,12 @@ function createParapheClones() {
         clone.style.height = 'auto';
         clone.style.position = 'absolute';
         clone.style.pointerEvents = 'none';
-        clone.style.opacity = '0.8';
-        clone.style.border = '2px dashed #764ba2';
+        clone.style.opacity = '0.85';
+        clone.style.border = '2px dashed var(--purple)';
         clone.style.borderRadius = '5px';
         clone.style.padding = '5px';
-        clone.style.background = 'rgba(255, 255, 255, 0.9)';
-        clone.style.boxShadow = '0 4px 12px rgba(118, 75, 162, 0.3)';
+        clone.style.background = 'transparent';
+        clone.style.boxShadow = 'none';
 
         const pageCanvas = pageContainer.querySelector('.pdf-page-canvas');
         if (pageCanvas) {
@@ -1679,78 +1675,6 @@ async function createSignedPDF() {
 
     return await pdfDoc.save();
 }
-
-// ==============================================
-// EMAIL
-// ==============================================
-emailBtn.addEventListener('click', () => {
-    emailForm.style.display = 'block';
-});
-
-cancelEmailBtn.addEventListener('click', () => {
-    emailForm.style.display = 'none';
-    document.getElementById('email-status').textContent = '';
-});
-
-sendEmailBtn.addEventListener('click', async () => {
-    const recipientEmail = document.getElementById('recipient-email').value;
-    const subject = document.getElementById('email-subject').value;
-    const message = document.getElementById('email-message').value;
-    const statusDiv = document.getElementById('email-status');
-
-    if (!recipientEmail) {
-        statusDiv.textContent = 'Veuillez entrer une adresse email';
-        statusDiv.className = 'status-message error';
-        return;
-    }
-
-    if (!state.signatureData) {
-        statusDiv.textContent = 'Veuillez creer une signature d\'abord';
-        statusDiv.className = 'status-message error';
-        return;
-    }
-
-    try {
-        statusDiv.textContent = 'Envoi en cours...';
-        statusDiv.className = 'status-message';
-
-        const pdfBytes = await createSignedPDF();
-        const pdfBase64 = btoa(String.fromCharCode(...new Uint8Array(pdfBytes)));
-
-        const apiUrl = window.location.hostname === 'localhost'
-            ? 'http://localhost:3000/send-email'
-            : '/api/send-email';
-
-        const response = await fetch(apiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                to: recipientEmail,
-                subject: subject,
-                message: message,
-                pdfData: pdfBase64
-            })
-        });
-
-        const result = await response.json();
-
-        if (result.success) {
-            statusDiv.textContent = 'Email envoye avec succes!';
-            statusDiv.className = 'status-message success';
-            setTimeout(() => {
-                emailForm.style.display = 'none';
-                statusDiv.textContent = '';
-            }, 3000);
-        } else {
-            statusDiv.textContent = 'Erreur: ' + result.message;
-            statusDiv.className = 'status-message error';
-        }
-    } catch (error) {
-        console.error('Erreur envoi email:', error);
-        statusDiv.textContent = 'Erreur lors de l\'envoi. Verifiez que le serveur est demarre.';
-        statusDiv.className = 'status-message error';
-    }
-});
 
 // ==============================================
 // ANNOTATION SUR LE DOCUMENT (surligneur de pages)
