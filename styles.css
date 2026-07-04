@@ -1346,6 +1346,16 @@ footer {
     margin-top: 28px; text-align: center;
     color: var(--label-3); font-size: .75em; padding: 14px 0;
 }
+.app-version {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 7px;
+    border-radius: 980px;
+    background: var(--bg-input);
+    color: var(--label-2);
+    font-size: .92em; font-weight: 600;
+    letter-spacing: .02em;
+}
 
 /* =============================================
    PREVENT SCROLL DURING DRAWING (iOS fix)

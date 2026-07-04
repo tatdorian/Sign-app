@@ -1,6 +1,6 @@
 {
   "name": "application-de-signature",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Application de signature de documents avec téléchargement en PDF",
   "main": "server.js",
   "scripts": {
