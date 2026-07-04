@@ -249,27 +249,31 @@ async function handleFileUpload(e) {
         state.uploadedFile = file;
         fileInfo.textContent = `Fichier: ${file.name}`;
 
-        // Reset overlays position for new document
-        const signatureOverlay = document.getElementById('signature-overlay');
-        const parapheOverlay = document.getElementById('paraphe-overlay');
-        const sigPreview = document.getElementById('signature-preview');
-        const parPreview = document.getElementById('paraphe-preview');
+        if (currentView === 'signature') {
+            // Reset overlays position for new document (service Signature)
+            const signatureOverlay = document.getElementById('signature-overlay');
+            const parapheOverlay = document.getElementById('paraphe-overlay');
+            const sigPreview = document.getElementById('signature-preview');
+            const parPreview = document.getElementById('paraphe-preview');
 
-        if (signatureOverlay) signatureOverlay.style.display = 'none';
-        if (parapheOverlay) parapheOverlay.style.display = 'none';
+            if (signatureOverlay) signatureOverlay.style.display = 'none';
+            if (parapheOverlay) parapheOverlay.style.display = 'none';
 
-        // Reset position for new document
-        if (sigPreview) {
-            sigPreview.style.left = '';
-            sigPreview.style.top = '';
+            if (sigPreview) {
+                sigPreview.style.left = '';
+                sigPreview.style.top = '';
+            }
+            if (parPreview) {
+                parPreview.style.left = '';
+                parPreview.style.top = '';
+            }
+
+            removeParapheClones();
+            removeSignatureClones();
+        } else if (currentView === 'editor') {
+            // Nouveau document dans l'éditeur : purger les éléments d'édition
+            if (typeof resetEditor === 'function') resetEditor();
         }
-        if (parPreview) {
-            parPreview.style.left = '';
-            parPreview.style.top = '';
-        }
-
-        removeParapheClones();
-        removeSignatureClones();
 
         // Vider le contenu precedent (garder les overlays)
         const children = Array.from(documentPreview.children);
@@ -332,25 +336,29 @@ if (newDocBtn) {
         state.currentPage = 1;
         state.signaturePage = 1;
 
-        // Reset overlays
-        const signatureOverlay = document.getElementById('signature-overlay');
-        const parapheOverlay = document.getElementById('paraphe-overlay');
-        const sigPreview = document.getElementById('signature-preview');
-        const parPreview = document.getElementById('paraphe-preview');
+        // Reset des calques du service actif uniquement (documents séparés)
+        if (currentView === 'signature') {
+            const signatureOverlay = document.getElementById('signature-overlay');
+            const parapheOverlay = document.getElementById('paraphe-overlay');
+            const sigPreview = document.getElementById('signature-preview');
+            const parPreview = document.getElementById('paraphe-preview');
 
-        if (signatureOverlay) signatureOverlay.style.display = 'none';
-        if (parapheOverlay) parapheOverlay.style.display = 'none';
-        if (sigPreview) {
-            sigPreview.style.left = '';
-            sigPreview.style.top = '';
-        }
-        if (parPreview) {
-            parPreview.style.left = '';
-            parPreview.style.top = '';
-        }
+            if (signatureOverlay) signatureOverlay.style.display = 'none';
+            if (parapheOverlay) parapheOverlay.style.display = 'none';
+            if (sigPreview) {
+                sigPreview.style.left = '';
+                sigPreview.style.top = '';
+            }
+            if (parPreview) {
+                parPreview.style.left = '';
+                parPreview.style.top = '';
+            }
 
-        removeParapheClones();
-        removeSignatureClones();
+            removeParapheClones();
+            removeSignatureClones();
+        } else if (typeof resetEditor === 'function') {
+            resetEditor();
+        }
 
         // Vider le preview
         const children = Array.from(documentPreview.children);
@@ -373,9 +381,8 @@ if (newDocBtn) {
         fileInput.value = '';
         fileInfo.textContent = 'PDF ou Image (JPG, PNG)';
 
-        // Réinitialiser l'éditeur (les éléments sont propres au document)
         documentLoaded = false;
-        if (typeof resetEditor === 'function') resetEditor();
+        state.pageTextRuns = {};
         if (typeof applyView === 'function') applyView();
 
         // Garder les sections signature/paraphe/actions visibles si signature existe
@@ -1491,11 +1498,15 @@ function getSignatureTargetPages() {
 downloadBtn.addEventListener('click', generateAndDownloadPDF);
 
 async function generateAndDownloadPDF() {
-    const hasEditorContent = document.querySelectorAll('#editor-overlay .editor-el').length > 0;
-    if (!state.signatureData && !state.parapheData && !hasEditorContent) {
-        alert(currentView === 'editor'
-            ? 'Ajoutez au moins un élément (texte, image, forme…) avant de télécharger.'
-            : 'Veuillez creer une signature d\'abord!');
+    // Documents séparés : chaque service exige son propre contenu
+    if (currentView === 'editor') {
+        const hasEditorContent = document.querySelectorAll('#editor-overlay .editor-el').length > 0;
+        if (!hasEditorContent) {
+            alert('Ajoutez au moins un élément (texte, image, forme…) avant de télécharger.');
+            return;
+        }
+    } else if (!state.signatureData && !state.parapheData) {
+        alert('Veuillez creer une signature d\'abord!');
         return;
     }
 
@@ -1558,8 +1569,9 @@ async function createSignedPDF() {
 
     const pages = pdfDoc.getPages();
 
-    // Embed signature (optionnelle : le document peut être seulement édité)
-    if (state.signatureData) {
+    // Embed signature — uniquement dans le service Signature : les documents
+    // sont séparés, l'éditeur exporte SON document sans signature
+    if (state.signatureData && currentView === 'signature') {
     const signatureImageBytes = await fetch(state.signatureData).then(res => res.arrayBuffer());
     const signatureImage = await pdfDoc.embedPng(signatureImageBytes);
 
@@ -1653,8 +1665,8 @@ async function createSignedPDF() {
     }
     } // fin if (state.signatureData)
 
-    // Ajouter le paraphe sur toutes les pages
-    if (state.parapheData) {
+    // Ajouter le paraphe sur toutes les pages (service Signature uniquement)
+    if (state.parapheData && currentView === 'signature') {
         const parapheImageBytes = await fetch(state.parapheData).then(res => res.arrayBuffer());
         const parapheImage = await pdfDoc.embedPng(parapheImageBytes);
 
@@ -2167,8 +2179,23 @@ function applyView() {
     if (sizeControl)      sizeControl.style.display      = (!isEditor && !isScanner && documentLoaded) ? 'block' : 'none';
     if (placementControl) placementControl.style.display = (!isEditor && !isScanner && documentLoaded) ? 'flex'  : 'none';
 
-    // Barre + overlay de l'éditeur
-    if (editorOverlay) editorOverlay.style.display = documentLoaded ? 'block' : 'none';
+    // Barre d'outils du document (info pages / surligneur / nouveau)
+    const docToolbar = document.getElementById('doc-toolbar');
+    if (docToolbar) docToolbar.style.display = (documentLoaded && !isScanner) ? 'flex' : 'none';
+
+    // Les documents étant séparés par service, chaque service ne montre
+    // que SES calques : éléments d'édition dans l'éditeur, signature/paraphe
+    // dans le service Signature
+    if (editorOverlay) editorOverlay.style.display = (isEditor && documentLoaded) ? 'block' : 'none';
+    const sigOverlay = document.getElementById('signature-overlay');
+    const parOverlay = document.getElementById('paraphe-overlay');
+    if (isEditor || isScanner) {
+        if (sigOverlay) sigOverlay.style.display = 'none';
+        if (parOverlay) parOverlay.style.display = 'none';
+    } else if (documentLoaded) {
+        if (state.signatureData) showSignatureOnDocument();
+        if (state.parapheData) showParapheOnDocument();
+    }
 
     if (isEditor) {
         if (typeof setAnnotationMode === 'function') setAnnotationMode(false);
@@ -2184,9 +2211,72 @@ function applyView() {
     }
 }
 
+// ==============================================
+// DOCUMENTS SÉPARÉS PAR SERVICE
+// Chaque service (Signature / Éditeur) conserve SON document : charger un
+// PDF dans l'éditeur ne l'affiche plus dans le service Signature.
+// ==============================================
+function emptyDocContext() {
+    return {
+        nodes: null, loaded: false, file: null, fileType: null,
+        pdfBytes: null, pageTextRuns: {}, totalPages: 1, signaturePage: 1,
+        fileInfo: null, pageInfo: ''
+    };
+}
+const docContexts = { signature: emptyDocContext(), editor: emptyDocContext() };
+
+function stashDocContext(view) {
+    if (view !== 'signature' && view !== 'editor') return;
+    const ctx = docContexts[view];
+    ctx.loaded = documentLoaded;
+    ctx.file = state.uploadedFile;
+    ctx.fileType = state.uploadedFileType;
+    ctx.pdfBytes = state.originalPdfBytes;
+    ctx.pageTextRuns = state.pageTextRuns;
+    ctx.totalPages = state.totalPages;
+    ctx.signaturePage = state.signaturePage;
+    ctx.fileInfo = fileInfo ? fileInfo.textContent : null;
+    const pageInfoDisplay = document.getElementById('page-info-display');
+    ctx.pageInfo = pageInfoDisplay ? pageInfoDisplay.textContent : '';
+    // Détacher les nœuds du document (pages/canvas/image), garder les overlays
+    ctx.nodes = [];
+    Array.from(documentPreview.children).forEach(ch => {
+        if (ch.id !== 'signature-overlay' && ch.id !== 'paraphe-overlay' && ch.id !== 'editor-overlay') {
+            ctx.nodes.push(ch);
+            ch.remove();
+        }
+    });
+}
+
+function restoreDocContext(view) {
+    if (view !== 'signature' && view !== 'editor') return;
+    const ctx = docContexts[view];
+    // Sécurité : purger tout nœud de document restant
+    Array.from(documentPreview.children).forEach(ch => {
+        if (ch.id !== 'signature-overlay' && ch.id !== 'paraphe-overlay' && ch.id !== 'editor-overlay') ch.remove();
+    });
+    if (ctx.nodes) {
+        for (const n of ctx.nodes) documentPreview.insertBefore(n, documentPreview.firstChild);
+        ctx.nodes = null;
+    }
+    state.uploadedFile = ctx.file;
+    state.uploadedFileType = ctx.fileType;
+    state.originalPdfBytes = ctx.pdfBytes;
+    state.pageTextRuns = ctx.pageTextRuns || {};
+    state.totalPages = ctx.totalPages;
+    state.signaturePage = ctx.signaturePage;
+    documentLoaded = ctx.loaded;
+    if (fileInfo) fileInfo.textContent = (ctx.loaded && ctx.fileInfo) ? ctx.fileInfo : 'PDF, JPG, PNG';
+    const pageInfoDisplay = document.getElementById('page-info-display');
+    if (pageInfoDisplay) pageInfoDisplay.textContent = ctx.pageInfo || '';
+}
+
 function setView(view) {
     if (view !== 'signature' && view !== 'editor' && view !== 'scanner') return;
+    if (view === currentView) return;
+    stashDocContext(currentView);
     currentView = view;
+    restoreDocContext(view);
     applyView();
     // Repositionner l'overlay si on arrive sur l'éditeur
     if (view === 'editor') syncEditorOverlayHeight();
@@ -3194,6 +3284,9 @@ function scanShowStep(step) {
     if (scanCaptureStep) scanCaptureStep.style.display = step === 'capture' ? 'block' : 'none';
     if (scanAdjustStep)  scanAdjustStep.style.display  = step === 'adjust'  ? 'block' : 'none';
     if (scanResultStep)  scanResultStep.style.display  = step === 'result'  ? 'block' : 'none';
+    // La taille écran des poignées dépend de la largeur affichée : recalculer
+    // une fois l'étape visible (getBoundingClientRect vaut 0 quand masqué)
+    if (step === 'adjust') requestAnimationFrame(() => updateQuadUI());
 }
 
 // ---------- Capture ----------
@@ -3279,11 +3372,26 @@ function updateQuadUI() {
     const pw = scanPreview.width, ph = scanPreview.height;
     const pts = scanState.quad.map(p => `${(p.x * pw).toFixed(1)},${(p.y * ph).toFixed(1)}`).join(' ');
     scanQuadPoly.setAttribute('points', pts);
-    const handles = scanQuadSvg.querySelectorAll('.scan-handle');
-    handles.forEach(h => {
+
+    // Taille ÉCRAN constante des poignées : le viewBox fait jusqu'à 1000
+    // unités affichées sur ~360 px de téléphone — sans conversion, le point
+    // ferait ~5 px et serait insélectionnable au doigt
+    const rect = scanQuadSvg.getBoundingClientRect();
+    const unitsPerPx = rect.width > 4 ? pw / rect.width : 1;
+    const rDot = 9 * unitsPerPx;    // point visible ≈ 9 px écran
+    const rHit = 27 * unitsPerPx;   // zone tactile ≈ 27 px écran
+
+    scanQuadSvg.querySelectorAll('.scan-handle-dot').forEach(h => {
         const i = parseInt(h.dataset.corner);
         h.setAttribute('cx', (scanState.quad[i].x * pw).toFixed(1));
         h.setAttribute('cy', (scanState.quad[i].y * ph).toFixed(1));
+        h.setAttribute('r', rDot.toFixed(1));
+    });
+    scanQuadSvg.querySelectorAll('.scan-handle').forEach(h => {
+        const i = parseInt(h.dataset.corner);
+        h.setAttribute('cx', (scanState.quad[i].x * pw).toFixed(1));
+        h.setAttribute('cy', (scanState.quad[i].y * ph).toFixed(1));
+        h.setAttribute('r', rHit.toFixed(1));
     });
 }
 
@@ -3307,13 +3415,20 @@ if (scanQuadSvg) {
             const up = () => {
                 handle.removeEventListener('pointermove', move);
                 handle.removeEventListener('pointerup', up);
+                handle.removeEventListener('pointercancel', up);
                 if (scanLoupe) scanLoupe.style.display = 'none';
             };
             handle.addEventListener('pointermove', move);
             handle.addEventListener('pointerup', up);
+            handle.addEventListener('pointercancel', up);
         });
     });
 }
+
+// Poignées à taille écran constante : recalcul au redimensionnement
+window.addEventListener('resize', () => {
+    if (scanAdjustStep && scanAdjustStep.style.display !== 'none') updateQuadUI();
+});
 
 function updateLoupe(nx, ny, dispX, dispY, rect) {
     if (!scanLoupe || !scanLoupeCanvas || !scanPreview) return;
@@ -3349,6 +3464,23 @@ if (scanBackBtn) scanBackBtn.addEventListener('click', () => scanShowStep('adjus
 // conserve les pages déjà ajoutées au document)
 const scanRetake2Btn = document.getElementById('scan-retake2-btn');
 if (scanRetake2Btn) scanRetake2Btn.addEventListener('click', () => scanShowStep('capture'));
+
+// Pivoter le scan APRÈS redressement (90° horaire), filtre re-appliqué
+const scanRotateResultBtn = document.getElementById('scan-rotate-result-btn');
+if (scanRotateResultBtn) {
+    scanRotateResultBtn.addEventListener('click', async () => {
+        if (!scanState.warped) return;
+        const src = scanState.warped;
+        const rot = document.createElement('canvas');
+        rot.width = src.height; rot.height = src.width;
+        const rctx = rot.getContext('2d');
+        rctx.translate(rot.width / 2, rot.height / 2);
+        rctx.rotate(Math.PI / 2);
+        rctx.drawImage(src, -src.width / 2, -src.height / 2);
+        scanState.warped = rot;
+        await applyScanMode();
+    });
+}
 
 // Pivoter la photo de 90° (sens horaire) — le cadre suit
 const scanRotateBtn = document.getElementById('scan-rotate-btn');

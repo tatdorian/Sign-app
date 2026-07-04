@@ -458,10 +458,18 @@ header { margin-bottom: 24px; }
     stroke-linejoin: round;
     vector-effect: non-scaling-stroke;
 }
-.scan-handle {
+/* Point visible (taille écran constante, recalculée en JS) */
+.scan-handle-dot {
     fill: #fff;
     stroke: var(--blue);
     stroke-width: 3;
+    vector-effect: non-scaling-stroke;
+    pointer-events: none;
+}
+/* Zone tactile invisible, bien plus large que le point (doigt sur mobile) */
+.scan-handle {
+    fill: rgba(255,255,255,0.001);
+    stroke: none;
     cursor: grab;
     touch-action: none;
 }
