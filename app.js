@@ -3568,25 +3568,42 @@ function detectDocumentQuad(srcCanvas) {
         cctx.drawImage(srcCanvas, 0, 0, w, h);
         const data = cctx.getImageData(0, 0, w, h).data;
 
-        // Niveaux de gris
+        // Niveaux de gris + canal "papier" (clair ET peu saturé) — le canal
+        // papier révèle les bords que la seule luminance ne voit pas
+        // (feuille blanche sur fond coloré de luminosité proche)
         let gray = new Float32Array(w * h);
+        let paperCh = new Float32Array(w * h);
         for (let i = 0, j = 0; i < gray.length; i++, j += 4) {
-            gray[i] = 0.299 * data[j] + 0.587 * data[j + 1] + 0.114 * data[j + 2];
+            const r = data[j], g = data[j + 1], b = data[j + 2];
+            gray[i] = 0.299 * r + 0.587 * g + 0.114 * b;
+            const sat = Math.max(r, g, b) - Math.min(r, g, b);
+            paperCh[i] = 0.55 * gray[i] + 0.45 * (255 - sat);
         }
         gray = gaussianBlur5(gray, w, h);
+        gray = gaussianBlur5(gray, w, h);
+        paperCh = gaussianBlur5(paperCh, w, h);
+        paperCh = gaussianBlur5(paperCh, w, h);
 
-        // Gradients de Sobel
+        // Gradients de Sobel BI-CANAUX : à chaque pixel on garde le canal au
+        // gradient le plus fort — toutes les stratégies (Canny, Hough,
+        // raffinement) en profitent
         const mag = new Float32Array(w * h);
         const dir = new Uint8Array(w * h); // 0:0°, 1:45°, 2:90°, 3:135°
         let maxMag = 0;
         for (let y = 1; y < h - 1; y++) {
             for (let x = 1; x < w - 1; x++) {
                 const i = y * w + x;
-                const gx = -gray[i - w - 1] - 2 * gray[i - 1] - gray[i + w - 1]
-                          + gray[i - w + 1] + 2 * gray[i + 1] + gray[i + w + 1];
-                const gy = -gray[i - w - 1] - 2 * gray[i - w] - gray[i - w + 1]
-                          + gray[i + w - 1] + 2 * gray[i + w] + gray[i + w + 1];
-                const m = Math.hypot(gx, gy);
+                let gx = -gray[i - w - 1] - 2 * gray[i - 1] - gray[i + w - 1]
+                        + gray[i - w + 1] + 2 * gray[i + 1] + gray[i + w + 1];
+                let gy = -gray[i - w - 1] - 2 * gray[i - w] - gray[i - w + 1]
+                        + gray[i + w - 1] + 2 * gray[i + w] + gray[i + w + 1];
+                let m = Math.hypot(gx, gy);
+                const pgx = -paperCh[i - w - 1] - 2 * paperCh[i - 1] - paperCh[i + w - 1]
+                           + paperCh[i - w + 1] + 2 * paperCh[i + 1] + paperCh[i + w + 1];
+                const pgy = -paperCh[i - w - 1] - 2 * paperCh[i - w] - paperCh[i - w + 1]
+                           + paperCh[i + w - 1] + 2 * paperCh[i + w] + paperCh[i + w + 1];
+                const pm = Math.hypot(pgx, pgy) * 0.92;
+                if (pm > m) { m = pm; gx = pgx; gy = pgy; }
                 mag[i] = m;
                 if (m > maxMag) maxMag = m;
                 const a = Math.atan2(gy, gx) * 180 / Math.PI;
@@ -3613,6 +3630,19 @@ function detectDocumentQuad(srcCanvas) {
             }
         }
 
+        // Porte anti-bruit : sur une photo en basse lumière le gradient est
+        // partout non nul et tout candidat obtient un "support" parfait.
+        // On estime le plancher de bruit (médiane de TOUTES les magnitudes,
+        // ~0 sur une photo propre) et on éteint le NMS sous 2,5x ce plancher.
+        const magSample = [];
+        for (let i = 0; i < mag.length; i += 11) magSample.push(mag[i]);
+        magSample.sort((a, b) => a - b);
+        const noiseFloor = magSample[Math.floor(magSample.length * 0.5)];
+        if (noiseFloor > 1) {
+            const gate = noiseFloor * 2.5;
+            for (let i = 0; i < nms.length; i++) if (nms[i] < gate) nms[i] = 0;
+        }
+
         // Stratégie 1 — Canny multi-seuils : le texte du document produit des
         // gradients très forts qui tirent le percentile vers le haut ; on teste
         // plusieurs seuils décroissants et on garde tous les quads candidats.
@@ -3633,15 +3663,9 @@ function detectDocumentQuad(srcCanvas) {
         // le gris (document = grande région claire) et le canal "papier"
         // (clair ET peu saturé — sépare une feuille d'un fond coloré de
         // luminosité proche : bois, nappe…)
-        const paper = new Float32Array(w * h);
-        for (let i = 0, j = 0; i < paper.length; i++, j += 4) {
-            const r = data[j], g = data[j + 1], b = data[j + 2];
-            const sat = Math.max(r, g, b) - Math.min(r, g, b);
-            paper[i] = 0.55 * gray[i] + 0.45 * (255 - sat);
-        }
         const otsuQuad = quadFromBrightRegion(gray, w, h);
         if (otsuQuad) candidates.push(otsuQuad);
-        const paperQuad = quadFromBrightRegion(paper, w, h);
+        const paperQuad = quadFromBrightRegion(paperCh, w, h);
         if (paperQuad) candidates.push(paperQuad);
 
         // Stratégie 3 — transformée de Hough : les 4 bords en tant que droites
@@ -3653,8 +3677,16 @@ function detectDocumentQuad(srcCanvas) {
         // (aire, adhérence aux gradients, contraste intérieur/extérieur)
         let best = null, bestScore = 0;
         for (const q of candidates) {
-            const score = scoreQuadCandidate(q, nms, gray, w, h, supportThr);
+            const score = scoreQuadCandidate(q, nms, gray, w, h, supportThr, false);
             if (score > bestScore) { bestScore = score; best = q; }
+        }
+        // Repli assoupli : mieux vaut un candidat imparfait que la boîte
+        // par défaut que l'utilisateur devra replacer entièrement
+        if (!best) {
+            for (const q of candidates) {
+                const score = scoreQuadCandidate(q, nms, gray, w, h, supportThr, true);
+                if (score > bestScore) { bestScore = score; best = q; }
+            }
         }
         if (!best) return null;
 
@@ -3670,13 +3702,14 @@ function detectDocumentQuad(srcCanvas) {
 }
 
 // Score composite d'un quad candidat
-function scoreQuadCandidate(q, nms, gray, w, h, supportThr) {
-    if (!quadAnglesOk(q)) return 0;
+function scoreQuadCandidate(q, nms, gray, w, h, supportThr, relaxed) {
+    if (!quadAnglesOk(q, relaxed)) return 0;
     const areaRatio = polygonArea(q) / (w * h);
-    if (areaRatio < 0.12 || areaRatio > 1.02) return 0;
+    // > 1 possible quand des coins sortent du cadre (feuille coupée)
+    if (areaRatio < (relaxed ? 0.07 : 0.12) || areaRatio > 1.3) return 0;
     const support = quadEdgeSupport(q, nms, w, h, supportThr);
     const contrast = quadInsideOutsideContrast(q, gray, w, h);   // 0..1
-    return Math.pow(areaRatio, 0.6) * (0.25 + support) * (0.55 + 0.45 * contrast);
+    return Math.pow(Math.min(1, areaRatio), 0.6) * (0.25 + support) * (0.55 + 0.45 * contrast);
 }
 
 // L'intérieur d'un document est plus clair que l'extérieur (0..1, 0.5 neutre)
@@ -3794,7 +3827,10 @@ function houghQuadCandidates(nms, w, h, thr) {
     };
 
     const quads = [];
-    const m = 18;   // marge hors cadre tolérée (coins coupés par le cadrage)
+    // Marge hors cadre généreuse : une feuille dont les coins sortent de la
+    // photo (cadrage serré, très fréquent) reste détectable — les coins
+    // seront ramenés au bord de l'image par le raffinement
+    const m = Math.round(0.12 * Math.max(w, h));
     for (let a = 0; a < pairs.length && quads.length < 160; a++) {
         for (let b = a + 1; b < pairs.length && quads.length < 160; b++) {
             const [A1, A2] = pairs[a], [B1, B2] = pairs[b];
@@ -3942,8 +3978,10 @@ function quadFromBrightRegion(gray, w, h) {
     return bestQuad;
 }
 
-// Angles internes plausibles pour une feuille photographiée (32°..148°)
-function quadAnglesOk(quad) {
+// Angles internes plausibles pour une feuille photographiée
+// (32°..148°, ou 24°..156° en mode assoupli)
+function quadAnglesOk(quad, relaxed) {
+    const lo = relaxed ? 24 : 32, hi = relaxed ? 156 : 148;
     for (let i = 0; i < 4; i++) {
         const p = quad[(i + 3) % 4], q = quad[i], r = quad[(i + 1) % 4];
         const v1x = p[0] - q[0], v1y = p[1] - q[1];
@@ -3952,7 +3990,7 @@ function quadAnglesOk(quad) {
         if (n1 < 4 || n2 < 4) return false;
         const cos = (v1x * v2x + v1y * v2y) / (n1 * n2);
         const ang = Math.acos(Math.max(-1, Math.min(1, cos))) * 180 / Math.PI;
-        if (ang < 32 || ang > 148) return false;
+        if (ang < lo || ang > hi) return false;
     }
     return true;
 }
@@ -4496,9 +4534,13 @@ function enhanceBW(canvas) {
             const mean = sum / area;
             const variance = Math.max(0, sum2 / area - mean * mean);
             const T = mean * (1 + k * (Math.sqrt(variance) / R - 1));
-            // Seuil purement local : préserve le texte pâli dans les zones
-            // surexposées (reflets) que couperait un seuil absolu
-            bin[y * w + x] = gray[y * w + x] > T ? 1 : 0;
+            // Deux gardes complémentaires sur le gris NORMALISÉ (papier ≈ 250) :
+            // - seuil local de Sauvola (texte, y compris pâli sous un reflet)
+            // - seuil d'encre absolu : dans un aplat noir la variance locale est
+            //   nulle et Sauvola blanchirait l'intérieur — tout pixel < 112
+            //   est de l'encre, l'illumination étant déjà aplanie
+            const g = gray[y * w + x];
+            bin[y * w + x] = (g > T && g > 112) ? 1 : 0;
         }
     }
 
