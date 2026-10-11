@@ -321,14 +321,15 @@
                             <div class="drop-icon">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
                             </div>
-                            <p class="drop-text">Photographiez un document : il sera redressé et nettoyé comme avec un vrai scanner.</p>
+                            <p class="drop-text">Visez le document : un cadre bleu le suit en direct et la photo se prend toute seule. Il est ensuite redressé et nettoyé comme avec un vrai scanner.</p>
                             <div class="scan-capture-btns">
                                 <button class="btn btn-primary" id="scan-take-btn">
                                     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-                                    Prendre une photo
+                                    Scanner avec la caméra
                                 </button>
                                 <button class="btn btn-secondary" id="scan-gallery-btn">Choisir une image</button>
                             </div>
+                            <p class="scan-cam-msg" id="scan-cam-msg" style="display:none"></p>
                             <p class="file-info">Posez le document sur un fond contrasté, bien à plat</p>
                         </div>
                     </div>
@@ -545,12 +546,52 @@
         </main>
 
         <footer>
-            <p>&copy; 2026 Application de signature <span class="app-version">v1.0.2</span></p>
+            <p>&copy; 2026 Application de signature <span class="app-version">v1.0.3</span></p>
         </footer>
+    </div>
+
+    <!-- Scanner : caméra en direct (cadre bleu + capture automatique) -->
+    <div id="scan-camera" class="scan-camera" style="display:none" role="dialog" aria-modal="true" aria-label="Scanner un document">
+        <div class="scan-cam-bar scan-cam-top">
+            <button class="scan-cam-btn" id="scan-cam-close" type="button" aria-label="Fermer la caméra">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+            <div class="scan-cam-mode" role="group" aria-label="Mode de capture">
+                <button class="scan-cam-mode-btn active" type="button" data-cam-mode="auto">Auto</button>
+                <button class="scan-cam-mode-btn" type="button" data-cam-mode="manual">Manuel</button>
+            </div>
+            <button class="scan-cam-btn" id="scan-cam-torch" type="button" aria-label="Lampe torche" style="visibility:hidden">
+                <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg>
+            </button>
+        </div>
+        <div class="scan-cam-viewport" id="scan-cam-viewport">
+            <div class="scan-cam-stage" id="scan-cam-stage">
+                <video id="scan-cam-video" autoplay muted playsinline></video>
+                <svg id="scan-cam-overlay" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+                    <polygon id="scan-cam-quad" points="" />
+                </svg>
+                <div class="scan-cam-flash" id="scan-cam-flash"></div>
+            </div>
+            <div class="scan-cam-status" id="scan-cam-status" aria-live="polite">Ouverture de la caméra…</div>
+        </div>
+        <div class="scan-cam-bar scan-cam-bottom">
+            <button class="scan-cam-btn scan-cam-side" id="scan-cam-gallery" type="button" aria-label="Choisir une image">
+                <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.6"/><path d="M21 15l-5-5L5 21"/></svg>
+            </button>
+            <button class="scan-cam-shutter" id="scan-cam-shutter" type="button" aria-label="Prendre la photo">
+                <svg viewBox="0 0 80 80" aria-hidden="true">
+                    <circle class="scan-cam-ring" cx="40" cy="40" r="36"/>
+                    <circle class="scan-cam-ring-progress" id="scan-cam-progress" cx="40" cy="40" r="36"/>
+                </svg>
+                <span class="scan-cam-shutter-core"></span>
+            </button>
+            <span class="scan-cam-side scan-cam-pages" id="scan-cam-pages" aria-live="polite"></span>
+        </div>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="scan-detect.js"></script>
     <script src="app.js"></script>
 
     <!-- ============================================

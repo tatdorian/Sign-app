@@ -2274,6 +2274,7 @@ function restoreDocContext(view) {
 function setView(view) {
     if (view !== 'signature' && view !== 'editor' && view !== 'scanner') return;
     if (view === currentView) return;
+    if (view !== 'scanner' && typeof scanCloseCamera === 'function') scanCloseCamera();
     stashDocContext(currentView);
     currentView = view;
     restoreDocContext(view);
@@ -3319,8 +3320,10 @@ async function scanLoadFile(file) {
         if (bmp.close) bmp.close();
         scanState.source = src;
 
-        // Détection automatique des coins (sur version réduite)
-        scanState.quad = detectDocumentQuad(src) || defaultQuad();
+        // Détection automatique des coins (sur version réduite), puis
+        // raffinement haute résolution pour un cadrage au pixel près
+        const detected = detectDocumentQuad(src);
+        scanState.quad = detected ? refineDocumentQuad(src, detected) : defaultQuad();
 
         drawScanPreview();
         scanShowStep('adjust');
@@ -3339,7 +3342,7 @@ function defaultQuad() {
 
 const scanTakeBtn = document.getElementById('scan-take-btn');
 const scanGalleryBtn = document.getElementById('scan-gallery-btn');
-if (scanTakeBtn && scanInput) scanTakeBtn.addEventListener('click', () => scanInput.click());
+if (scanTakeBtn) scanTakeBtn.addEventListener('click', () => scanOpenCamera());
 if (scanGalleryBtn && scanInputGal) scanGalleryBtn.addEventListener('click', () => scanInputGal.click());
 if (scanInput) scanInput.addEventListener('change', () => { scanLoadFile(scanInput.files[0]); scanInput.value = ''; });
 if (scanInputGal) scanInputGal.addEventListener('change', () => { scanLoadFile(scanInputGal.files[0]); scanInputGal.value = ''; });
@@ -3352,6 +3355,495 @@ if (scanDrop) {
         e.preventDefault(); scanDrop.classList.remove('dragover');
         const f = e.dataTransfer.files && e.dataTransfer.files[0];
         if (f) scanLoadFile(f);
+    });
+}
+
+// ---------- Caméra en direct : cadre bleu + capture automatique ----------
+// Comme le scanner d'Apple : le flux vidéo est analysé en continu (Web
+// Worker), un cadre bleu suit le document, et la photo se prend toute seule
+// dès que le cadrage est fiable ET immobile. Le cadrage final est recalculé
+// sur la photo pleine résolution.
+const SCAN_LIVE_SIDE = 300;    // résolution d'analyse du flux (px, grand côté)
+const SCAN_SHOW_CONF = 0.5;    // preuve de bord minimale pour afficher le cadre
+const SCAN_AUTO_CONF = 0.65;   // ... et pour déclencher la capture automatique
+const SCAN_HOLD_MS   = 1100;   // durée d'immobilité avant la capture auto
+const SCAN_LOST_MS   = 600;    // cadre masqué après cette durée sans détection
+
+const scanCamEl       = document.getElementById('scan-camera');
+const scanCamVideo    = document.getElementById('scan-cam-video');
+const scanCamViewport = document.getElementById('scan-cam-viewport');
+const scanCamStage    = document.getElementById('scan-cam-stage');
+const scanCamOverlay  = document.getElementById('scan-cam-overlay');
+const scanCamQuadEl   = document.getElementById('scan-cam-quad');
+const scanCamStatus   = document.getElementById('scan-cam-status');
+const scanCamProgress = document.getElementById('scan-cam-progress');
+const scanCamFlashEl  = document.getElementById('scan-cam-flash');
+const scanCamTorch    = document.getElementById('scan-cam-torch');
+const scanCamPages    = document.getElementById('scan-cam-pages');
+const scanCamMsg      = document.getElementById('scan-cam-msg');
+const SCAN_RING_LEN   = 226.2;   // circonférence de l'anneau du déclencheur
+
+const scanCam = {
+    open: false, stream: null, track: null, torchOn: false,
+    auto: true,
+    unavailable: false,     // getUserMedia refusé/absent -> appareil photo natif
+    worker: null, workerFailed: false, reqId: 0, pending: null,
+    frameCv: null, loopTimer: null, raf: 0, lastTs: 0,
+    target: null,           // cadre suivi (lissé), coins normalisés TL,TR,BR,BL
+    shown: null,            // cadre affiché (interpolé vers target à chaque image)
+    candidate: null,        // nouvelle détection en attente de confirmation
+    anchor: null, lastRaw: null,
+    lastSeen: 0, stableSince: 0, hint: 'search',
+    capturing: false, histPushed: false,
+    session: 0              // incrémenté à chaque ouverture (flux périmés)
+};
+
+try { scanCam.auto = localStorage.getItem('scanCamMode') !== 'manual'; } catch (e) { /* stockage indisponible */ }
+
+// Distance max entre coins homologues, en fraction de la diagonale
+function scanQuadDist(a, b, vw, vh) {
+    const diag = Math.hypot(vw, vh);
+    let m = 0;
+    for (let i = 0; i < 4; i++) {
+        m = Math.max(m, Math.hypot((a[i].x - b[i].x) * vw, (a[i].y - b[i].y) * vh) / diag);
+    }
+    return m;
+}
+
+function scanLerpQuad(a, b, k) {
+    return a.map((p, i) => ({ x: p.x + (b[i].x - p.x) * k, y: p.y + (b[i].y - p.y) * k }));
+}
+
+// Point d'entrée : caméra en direct, ou appareil photo natif en repli
+function scanStartCapture() {
+    scanShowStep('capture');
+    scanOpenCamera();
+}
+
+async function scanOpenCamera() {
+    const live = scanCamEl && !scanCam.unavailable &&
+        navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
+    if (!live) {
+        if (scanInput) scanInput.click();
+        return;
+    }
+    if (scanCam.open) return;
+    scanCam.open = true;
+    scanCam.session++;
+    scanCamResetTracking();
+    scanCamApplyMode();
+    if (scanCamPages) {
+        const n = scanState.pages.length;
+        scanCamPages.textContent = n ? `${n} page${n > 1 ? 's' : ''}` : '';
+    }
+    scanCamEl.style.display = 'flex';
+    document.body.classList.add('scan-cam-open');
+    scanCamSetStatus('Ouverture de la caméra…', false);
+    // Bouton « retour » (Android) : ferme la caméra au lieu de quitter l'app
+    try { history.pushState({ scanCam: true }, ''); scanCam.histPushed = true; } catch (e) { /* ignoré */ }
+    try {
+        await scanCamStartStream();
+    } catch (err) {
+        console.warn('Caméra en direct:', err);
+        scanCloseCamera();
+        scanCamFallback(err);
+    }
+}
+
+function scanCamFallback(err) {
+    scanCam.unavailable = true;
+    if (!scanCamMsg) return;
+    const denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
+    scanCamMsg.textContent = (denied
+        ? "Accès à la caméra refusé. Autorisez-le dans les réglages du navigateur pour le cadrage automatique."
+        : "Caméra en direct indisponible sur cet appareil.")
+        + " En attendant, « Scanner avec la caméra » ouvre l'appareil photo du téléphone.";
+    scanCamMsg.style.display = 'block';
+}
+
+async function scanCamStartStream() {
+    const session = scanCam.session;
+    const base = { facingMode: { ideal: 'environment' } };
+    let stream;
+    try {
+        // Haute définition 4:3 si possible : la photo est prise dans le flux
+        stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: Object.assign({ width: { ideal: 2560 }, height: { ideal: 1920 } }, base)
+        });
+    } catch (err) {
+        if (err && (err.name === 'NotAllowedError' || err.name === 'SecurityError')) throw err;
+        stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: base });
+    }
+    // Fermé, rouvert ou passé en arrière-plan pendant la demande d'accès :
+    // ce flux est périmé, l'éteindre (sinon la caméra resterait allumée)
+    if (!scanCam.open || session !== scanCam.session || document.hidden) {
+        stream.getTracks().forEach(t => t.stop());
+        return;
+    }
+    scanCamStopStream();
+    scanCam.stream = stream;
+    scanCam.track = stream.getVideoTracks()[0] || null;
+    scanCam.torchOn = false;
+    let caps = {};
+    try { caps = (scanCam.track && scanCam.track.getCapabilities) ? scanCam.track.getCapabilities() : {}; } catch (e) { caps = {}; }
+    if (caps.focusMode && caps.focusMode.indexOf('continuous') >= 0) {
+        scanCam.track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {});
+    }
+    if (scanCamTorch) {
+        scanCamTorch.style.visibility = caps.torch ? 'visible' : 'hidden';
+        scanCamTorch.classList.remove('on');
+    }
+    scanCamVideo.muted = true;
+    scanCamVideo.srcObject = stream;
+    if (!scanCamVideo.videoWidth) {
+        await new Promise(res => {
+            const done = () => { scanCamVideo.removeEventListener('loadedmetadata', done); res(); };
+            scanCamVideo.addEventListener('loadedmetadata', done);
+            setTimeout(done, 3000);
+        });
+    }
+    try { await scanCamVideo.play(); } catch (e) { /* autoplay muet : déjà lancé */ }
+    scanCamLayout();
+    scanCamStartLoops();
+}
+
+function scanCamStopStream() {
+    if (scanCam.stream) scanCam.stream.getTracks().forEach(t => t.stop());
+    scanCam.stream = null;
+    scanCam.track = null;
+    if (scanCamVideo) scanCamVideo.srcObject = null;
+}
+
+function scanCloseCamera(fromHistory) {
+    if (!scanCam.open) return;
+    scanCam.open = false;
+    clearTimeout(scanCam.loopTimer);
+    cancelAnimationFrame(scanCam.raf);
+    scanCam.pending = null;
+    scanCamStopStream();
+    scanCamEl.style.display = 'none';
+    document.body.classList.remove('scan-cam-open');
+    if (scanCam.histPushed) {
+        scanCam.histPushed = false;
+        if (!fromHistory && history.state && history.state.scanCam) history.back();
+    }
+}
+
+function scanCamResetTracking() {
+    scanCam.target = scanCam.shown = scanCam.candidate = null;
+    scanCam.anchor = scanCam.lastRaw = null;
+    scanCam.lastSeen = 0;
+    scanCam.stableSince = performance.now();
+    scanCam.hint = 'search';
+    if (scanCamOverlay) scanCamOverlay.classList.remove('has-quad', 'locked');
+    if (scanCamProgress) scanCamProgress.style.strokeDashoffset = SCAN_RING_LEN;
+}
+
+// La scène épouse exactement le format de la vidéo (cadre bleu aligné)
+function scanCamLayout() {
+    const vw = scanCamVideo.videoWidth, vh = scanCamVideo.videoHeight;
+    if (!vw || !vh || !scanCamViewport) return;
+    const box = scanCamViewport.getBoundingClientRect();
+    const s = Math.min(box.width / vw, box.height / vh);
+    scanCamStage.style.width = Math.round(vw * s) + 'px';
+    scanCamStage.style.height = Math.round(vh * s) + 'px';
+    scanCamOverlay.setAttribute('viewBox', `0 0 ${vw} ${vh}`);
+}
+
+function scanCamStartLoops() {
+    clearTimeout(scanCam.loopTimer);
+    cancelAnimationFrame(scanCam.raf);
+    scanCam.lastTs = 0;
+    scanCam.raf = requestAnimationFrame(scanCamRender);
+    scanCam.loopTimer = setTimeout(scanCamDetectTick, 150);
+}
+
+// Analyse d'une image du flux (dans le Worker si possible)
+function scanCamDetectTick() {
+    scanCam.loopTimer = null;
+    if (!scanCam.open || !scanCam.stream || scanCam.capturing) return;
+    const v = scanCamVideo;
+    const vw = v.videoWidth, vh = v.videoHeight;
+    if (v.readyState < 2 || !vw || !vh) {
+        scanCam.loopTimer = setTimeout(scanCamDetectTick, 100);
+        return;
+    }
+    const s = SCAN_LIVE_SIDE / Math.max(vw, vh);
+    const w = Math.max(2, Math.round(vw * s)), h = Math.max(2, Math.round(vh * s));
+    if (!scanCam.frameCv) scanCam.frameCv = document.createElement('canvas');
+    const cv = scanCam.frameCv;
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+    const cctx = cv.getContext('2d', { willReadFrequently: true });
+    cctx.drawImage(v, 0, 0, w, h);
+    const img = cctx.getImageData(0, 0, w, h);
+    const t0 = performance.now();
+    const done = (res) => {
+        if (!scanCam.open || scanCam.capturing) return;
+        scanCamOnDetection(res, vw, vh);
+        // ~12 analyses/s au plus : inutile d'aller plus vite que la main
+        const wait = Math.max(0, 80 - (performance.now() - t0));
+        if (scanCam.open && !scanCam.capturing) scanCam.loopTimer = setTimeout(scanCamDetectTick, wait);
+    };
+    const wk = scanCamGetWorker();
+    if (wk) {
+        const id = ++scanCam.reqId;
+        scanCam.pending = { id, done };
+        wk.postMessage({ id, type: 'detect', w, h, buffer: img.data.buffer }, [img.data.buffer]);
+        // Garde-fou : un Worker muet ne doit pas figer l'analyse
+        setTimeout(() => {
+            if (scanCam.pending && scanCam.pending.id === id) {
+                scanCam.pending = null;
+                done(null);
+            }
+        }, 2500);
+    } else {
+        done(detectQuadInRGBA(img.data, w, h));
+    }
+}
+
+function scanCamGetWorker() {
+    if (scanCam.worker || scanCam.workerFailed) return scanCam.worker;
+    if (typeof Worker === 'undefined') { scanCam.workerFailed = true; return null; }
+    try {
+        const wk = new Worker('scan-detect.js');
+        wk.onmessage = (e) => {
+            const m = e.data || {};
+            const p = scanCam.pending;
+            if (p && p.id === m.id) { scanCam.pending = null; p.done(m.result); }
+        };
+        wk.onerror = (e) => {
+            // Repli : analyse sur le fil principal
+            console.warn('Worker scanner indisponible:', e.message || 'chargement impossible');
+            scanCam.workerFailed = true;
+            wk.terminate();
+            scanCam.worker = null;
+            const p = scanCam.pending;
+            scanCam.pending = null;
+            if (p) p.done(null);
+        };
+        scanCam.worker = wk;
+    } catch (err) {
+        scanCam.workerFailed = true;
+    }
+    return scanCam.worker;
+}
+
+// Suivi temporel : lissage, confirmation des nouvelles détections,
+// immobilité, conditions de cadrage, puis capture automatique
+function scanCamOnDetection(res, vw, vh) {
+    const now = performance.now();
+    const valid = res && !res.relaxed && res.confidence >= SCAN_SHOW_CONF;
+    if (valid) {
+        const q = res.quad;
+        if (scanCam.target && scanQuadDist(q, scanCam.target, vw, vh) < 0.06) {
+            // Même document : lissage (réactif, sans tremblement)
+            scanCam.target = scanLerpQuad(scanCam.target, q, 0.6);
+            scanCam.candidate = null;
+        } else if (scanCam.candidate && scanQuadDist(q, scanCam.candidate, vw, vh) < 0.06) {
+            // Nouveau document confirmé par 2 analyses successives
+            // (une détection isolée, possiblement fausse, n'est jamais affichée)
+            if (!scanCamOverlay.classList.contains('has-quad')) scanCam.shown = q;
+            scanCam.target = q;
+            scanCam.candidate = null;
+            scanCam.anchor = null;
+        } else {
+            // Saut brusque : à confirmer, et l'immobilité repart de zéro
+            scanCam.candidate = q;
+            scanCam.anchor = null;
+            scanCam.stableSince = now;
+        }
+        if (scanCam.target && !scanCam.candidate) {
+            // Immobile = proche de l'analyse précédente ET de la position de
+            // départ (une dérive lente ne passe pas)
+            const still = scanCam.anchor && scanCam.lastRaw &&
+                scanQuadDist(q, scanCam.lastRaw, vw, vh) < 0.012 &&
+                scanQuadDist(q, scanCam.anchor, vw, vh) < 0.02;
+            if (!still) { scanCam.anchor = q; scanCam.stableSince = now; }
+            scanCam.lastRaw = q;
+            scanCam.lastSeen = now;
+            // Cadrage exploitable ?
+            const m = 0.01;
+            const cut = res.partial || q.some(p => p.x < m || p.y < m || p.x > 1 - m || p.y > 1 - m);
+            const area = polygonArea(q.map(p => [p.x, p.y]));
+            scanCam.hint = cut ? 'far' : area < 0.15 ? 'near' : res.confidence < SCAN_AUTO_CONF ? 'weak' : '';
+        }
+    } else {
+        scanCam.candidate = null;
+        // Une analyse manquée isolée est tolérée ; au-delà, on repart de zéro
+        if (now - scanCam.lastSeen > 350) { scanCam.anchor = null; scanCam.stableSince = now; }
+        if (now - scanCam.lastSeen > SCAN_LOST_MS) {
+            scanCam.target = null;
+            scanCam.lastRaw = null;
+            scanCam.hint = 'search';
+        }
+    }
+    scanCamUpdateStatus();
+    // Capture automatique : uniquement sur une analyse valide et confirmée
+    if (valid && !scanCam.candidate && scanCam.auto && scanCamReady(now) &&
+        now - scanCam.stableSince >= SCAN_HOLD_MS) {
+        scanCamCapture(true);
+    }
+}
+
+function scanCamReady(now) {
+    return !!scanCam.target && !scanCam.hint && now - scanCam.lastSeen < 500;
+}
+
+function scanCamSetStatus(text, ok) {
+    if (!scanCamStatus) return;
+    if (scanCamStatus.textContent !== text) scanCamStatus.textContent = text;
+    scanCamStatus.classList.toggle('ok', !!ok);
+}
+
+function scanCamUpdateStatus() {
+    if (scanCam.capturing) return;
+    const msgs = {
+        search: 'Recherche du document…',
+        far: 'Reculez : le document doit être entier',
+        near: 'Rapprochez-vous du document',
+        weak: 'Placez le document sur un fond contrasté'
+    };
+    if (scanCam.hint && scanCam.target === null) scanCamSetStatus(msgs.search, false);
+    else if (scanCam.hint) scanCamSetStatus(msgs[scanCam.hint] || msgs.search, false);
+    else if (scanCam.auto) scanCamSetStatus('Ne bougez plus…', true);
+    else scanCamSetStatus('Document détecté — prêt', true);
+}
+
+// Rendu à chaque image : le cadre glisse en douceur vers la détection
+function scanCamRender(ts) {
+    if (!scanCam.open) return;
+    scanCam.raf = requestAnimationFrame(scanCamRender);
+    const dt = scanCam.lastTs ? Math.min(100, ts - scanCam.lastTs) : 16;
+    scanCam.lastTs = ts;
+    const vw = scanCamVideo.videoWidth, vh = scanCamVideo.videoHeight;
+    const now = performance.now();
+    const ready = scanCamReady(now);
+    if (scanCam.target && vw && vh) {
+        scanCam.shown = scanCam.shown
+            ? scanLerpQuad(scanCam.shown, scanCam.target, 1 - Math.exp(-dt / 70))
+            : scanCam.target;
+        scanCamQuadEl.setAttribute('points',
+            scanCam.shown.map(p => `${(p.x * vw).toFixed(1)},${(p.y * vh).toFixed(1)}`).join(' '));
+        scanCamOverlay.classList.add('has-quad');
+    } else {
+        scanCamOverlay.classList.remove('has-quad');
+    }
+    scanCamOverlay.classList.toggle('locked', ready);
+    const progress = scanCam.auto && ready
+        ? Math.min(1, (now - scanCam.stableSince) / SCAN_HOLD_MS) : 0;
+    if (scanCamProgress) scanCamProgress.style.strokeDashoffset = (SCAN_RING_LEN * (1 - progress)).toFixed(1);
+}
+
+function scanCamApplyMode() {
+    document.querySelectorAll('.scan-cam-mode-btn').forEach(b => {
+        b.classList.toggle('active', (b.dataset.camMode === 'auto') === scanCam.auto);
+    });
+    scanCam.stableSince = performance.now();
+    scanCamUpdateStatus();
+}
+
+// Prise de vue : image pleine résolution du flux, cadrage final recalculé
+// dessus. Auto -> directement le scan redressé ; manuel -> vérification des coins.
+async function scanCamCapture(auto) {
+    if (scanCam.capturing || !scanCam.open) return;
+    const v = scanCamVideo;
+    const vw = v.videoWidth, vh = v.videoHeight;
+    if (!vw || !vh) return;
+    scanCam.capturing = true;
+    clearTimeout(scanCam.loopTimer);
+    const s = Math.min(1, 3000 / Math.max(vw, vh));
+    const src = document.createElement('canvas');
+    src.width = Math.round(vw * s); src.height = Math.round(vh * s);
+    src.getContext('2d').drawImage(v, 0, 0, src.width, src.height);
+    const tracked = scanCam.target && performance.now() - scanCam.lastSeen < 500
+        ? scanCam.target.map(p => ({ x: p.x, y: p.y })) : null;
+
+    scanCamSetStatus('Capture…', true);
+    if (scanCamFlashEl) {
+        scanCamFlashEl.classList.remove('go');
+        void scanCamFlashEl.offsetWidth;   // relancer l'animation
+        scanCamFlashEl.classList.add('go');
+    }
+    try { if (navigator.vibrate) navigator.vibrate(30); } catch (e) { /* ignoré */ }
+    await new Promise(r => setTimeout(r, 200));
+    scanCloseCamera();
+    showLoader();
+    await new Promise(r => setTimeout(r, 30));
+    try {
+        scanState.source = src;
+        const quad = scanResolveQuad(src, tracked);
+        scanState.quad = quad || defaultQuad();
+        drawScanPreview();
+        if (auto && quad) await scanWarpToResult();
+        else scanShowStep('adjust');
+    } catch (err) {
+        console.error('Scanner capture:', err);
+        alert('Erreur lors de la capture: ' + err.message);
+        scanShowStep('capture');
+    } finally {
+        hideLoader();
+        scanCam.capturing = false;
+    }
+}
+
+// Cadrage final : détection sur la photo capturée (plus fine que l'analyse
+// du flux), recoupée avec le cadre suivi en direct — en cas de désaccord, le
+// cadre suivi (stable dans le temps) l'emporte — puis raffinement au pixel
+function scanResolveQuad(src, tracked) {
+    const r = detectDocumentQuadEx(src, 420);
+    const fresh = r && !r.relaxed ? r.quad : null;
+    let quad;
+    if (tracked && fresh) {
+        quad = scanQuadDist(fresh, tracked, src.width, src.height) < 0.04 ? fresh : tracked;
+    } else {
+        quad = fresh || tracked || (r ? r.quad : null);
+    }
+    return quad ? refineDocumentQuad(src, quad) : null;
+}
+
+if (scanCamEl) {
+    document.getElementById('scan-cam-close').addEventListener('click', () => scanCloseCamera());
+    document.getElementById('scan-cam-shutter').addEventListener('click', () => scanCamCapture(false));
+    document.getElementById('scan-cam-gallery').addEventListener('click', () => {
+        scanCloseCamera();
+        if (scanInputGal) scanInputGal.click();
+    });
+    document.querySelectorAll('.scan-cam-mode-btn').forEach(b => {
+        b.addEventListener('click', () => {
+            scanCam.auto = b.dataset.camMode === 'auto';
+            try { localStorage.setItem('scanCamMode', scanCam.auto ? 'auto' : 'manual'); } catch (e) { /* ignoré */ }
+            scanCamApplyMode();
+        });
+    });
+    if (scanCamTorch) {
+        scanCamTorch.addEventListener('click', async () => {
+            if (!scanCam.track) return;
+            try {
+                await scanCam.track.applyConstraints({ advanced: [{ torch: !scanCam.torchOn }] });
+                scanCam.torchOn = !scanCam.torchOn;
+                scanCamTorch.classList.toggle('on', scanCam.torchOn);
+            } catch (e) { /* lampe non pilotable */ }
+        });
+    }
+    scanCamVideo.addEventListener('resize', scanCamLayout);
+    window.addEventListener('resize', () => { if (scanCam.open) scanCamLayout(); });
+    window.addEventListener('popstate', () => { if (scanCam.open) scanCloseCamera(true); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && scanCam.open) scanCloseCamera(); });
+    // Application en arrière-plan : libérer la caméra, la reprendre au retour
+    document.addEventListener('visibilitychange', () => {
+        if (!scanCam.open) return;
+        if (document.hidden) {
+            clearTimeout(scanCam.loopTimer);
+            scanCamStopStream();
+        } else if (!scanCam.stream) {
+            scanCamResetTracking();
+            scanCamStartStream().catch(err => {
+                console.warn('Caméra en direct:', err);
+                scanCloseCamera();
+                scanCamFallback(err);
+            });
+        }
     });
 }
 
@@ -3457,13 +3949,13 @@ function updateLoupe(nx, ny, dispX, dispY, rect) {
 const scanRetakeBtn = document.getElementById('scan-retake-btn');
 const scanValidateBtn = document.getElementById('scan-validate-btn');
 const scanBackBtn = document.getElementById('scan-back-btn');
-if (scanRetakeBtn) scanRetakeBtn.addEventListener('click', () => scanShowStep('capture'));
+if (scanRetakeBtn) scanRetakeBtn.addEventListener('click', () => scanStartCapture());
 if (scanBackBtn) scanBackBtn.addEventListener('click', () => scanShowStep('adjust'));
 
 // Reprendre la photo depuis l'étape résultat (abandonne le scan courant,
 // conserve les pages déjà ajoutées au document)
 const scanRetake2Btn = document.getElementById('scan-retake2-btn');
-if (scanRetake2Btn) scanRetake2Btn.addEventListener('click', () => scanShowStep('capture'));
+if (scanRetake2Btn) scanRetake2Btn.addEventListener('click', () => scanStartCapture());
 
 // Pivoter le scan APRÈS redressement (90° horaire), filtre re-appliqué
 const scanRotateResultBtn = document.getElementById('scan-rotate-result-btn');
@@ -3503,6 +3995,13 @@ if (scanRotateBtn) {
     });
 }
 
+// Redressement du cadrage courant -> étape résultat (filtre appliqué)
+async function scanWarpToResult() {
+    scanState.warped = warpDocument(scanState.source, orderQuad(scanState.quad));
+    scanShowStep('result');
+    await applyScanMode();
+}
+
 if (scanValidateBtn) {
     scanValidateBtn.addEventListener('click', async () => {
         if (!scanState.source || !scanState.quad) return;
@@ -3510,9 +4009,7 @@ if (scanValidateBtn) {
         // Laisser le loader s'afficher avant le calcul lourd
         await new Promise(r => setTimeout(r, 30));
         try {
-            scanState.warped = warpDocument(scanState.source, orderQuad(scanState.quad));
-            scanShowStep('result');
-            await applyScanMode();
+            await scanWarpToResult();
         } catch (err) {
             console.error('Scanner warp:', err);
             alert('Erreur lors du redressement: ' + err.message);
@@ -3554,627 +4051,45 @@ async function applyScanMode() {
 }
 
 // ---------- Détection automatique des coins ----------
-// Pipeline: réduction -> gris -> gaussien -> Sobel/Canny -> dilatation
-// -> composantes connexes -> enveloppe convexe -> réduction à 4 sommets
-function detectDocumentQuad(srcCanvas) {
+// Le moteur (fonctions pures) est dans scan-detect.js, partagé avec le Web
+// Worker qui analyse le flux de la caméra en direct.
+function detectDocumentQuadEx(srcCanvas, maxSide) {
     try {
-        const maxSide = 420;
-        const s = maxSide / Math.max(srcCanvas.width, srcCanvas.height);
+        const s = (maxSide || 420) / Math.max(srcCanvas.width, srcCanvas.height);
         const w = Math.max(2, Math.round(srcCanvas.width * s));
         const h = Math.max(2, Math.round(srcCanvas.height * s));
         const cv = document.createElement('canvas');
         cv.width = w; cv.height = h;
         const cctx = cv.getContext('2d');
         cctx.drawImage(srcCanvas, 0, 0, w, h);
-        const data = cctx.getImageData(0, 0, w, h).data;
-
-        // Niveaux de gris + canal "papier" (clair ET peu saturé) — le canal
-        // papier révèle les bords que la seule luminance ne voit pas
-        // (feuille blanche sur fond coloré de luminosité proche)
-        let gray = new Float32Array(w * h);
-        let paperCh = new Float32Array(w * h);
-        for (let i = 0, j = 0; i < gray.length; i++, j += 4) {
-            const r = data[j], g = data[j + 1], b = data[j + 2];
-            gray[i] = 0.299 * r + 0.587 * g + 0.114 * b;
-            const sat = Math.max(r, g, b) - Math.min(r, g, b);
-            paperCh[i] = 0.55 * gray[i] + 0.45 * (255 - sat);
-        }
-        gray = gaussianBlur5(gray, w, h);
-        gray = gaussianBlur5(gray, w, h);
-        paperCh = gaussianBlur5(paperCh, w, h);
-        paperCh = gaussianBlur5(paperCh, w, h);
-
-        // Gradients de Sobel BI-CANAUX : à chaque pixel on garde le canal au
-        // gradient le plus fort — toutes les stratégies (Canny, Hough,
-        // raffinement) en profitent
-        const mag = new Float32Array(w * h);
-        const dir = new Uint8Array(w * h); // 0:0°, 1:45°, 2:90°, 3:135°
-        let maxMag = 0;
-        for (let y = 1; y < h - 1; y++) {
-            for (let x = 1; x < w - 1; x++) {
-                const i = y * w + x;
-                let gx = -gray[i - w - 1] - 2 * gray[i - 1] - gray[i + w - 1]
-                        + gray[i - w + 1] + 2 * gray[i + 1] + gray[i + w + 1];
-                let gy = -gray[i - w - 1] - 2 * gray[i - w] - gray[i - w + 1]
-                        + gray[i + w - 1] + 2 * gray[i + w] + gray[i + w + 1];
-                let m = Math.hypot(gx, gy);
-                const pgx = -paperCh[i - w - 1] - 2 * paperCh[i - 1] - paperCh[i + w - 1]
-                           + paperCh[i - w + 1] + 2 * paperCh[i + 1] + paperCh[i + w + 1];
-                const pgy = -paperCh[i - w - 1] - 2 * paperCh[i - w] - paperCh[i - w + 1]
-                           + paperCh[i + w - 1] + 2 * paperCh[i + w] + paperCh[i + w + 1];
-                const pm = Math.hypot(pgx, pgy) * 0.92;
-                if (pm > m) { m = pm; gx = pgx; gy = pgy; }
-                mag[i] = m;
-                if (m > maxMag) maxMag = m;
-                const a = Math.atan2(gy, gx) * 180 / Math.PI;
-                const aa = ((a % 180) + 180) % 180;
-                dir[i] = aa < 22.5 || aa >= 157.5 ? 0 : aa < 67.5 ? 1 : aa < 112.5 ? 2 : 3;
-            }
-        }
-
-        // Suppression des non-maxima
-        const nms = new Float32Array(w * h);
-        for (let y = 1; y < h - 1; y++) {
-            for (let x = 1; x < w - 1; x++) {
-                const i = y * w + x;
-                const m = mag[i];
-                if (m === 0) continue;
-                let a = 0, b = 0;
-                switch (dir[i]) {
-                    case 0: a = mag[i - 1]; b = mag[i + 1]; break;
-                    case 1: a = mag[i - w + 1]; b = mag[i + w - 1]; break;
-                    case 2: a = mag[i - w]; b = mag[i + w]; break;
-                    default: a = mag[i - w - 1]; b = mag[i + w + 1];
-                }
-                if (m >= a && m >= b) nms[i] = m;
-            }
-        }
-
-        // Porte anti-bruit : sur une photo en basse lumière le gradient est
-        // partout non nul et tout candidat obtient un "support" parfait.
-        // On estime le plancher de bruit (médiane de TOUTES les magnitudes,
-        // ~0 sur une photo propre) et on éteint le NMS sous 2,5x ce plancher.
-        const magSample = [];
-        for (let i = 0; i < mag.length; i += 11) magSample.push(mag[i]);
-        magSample.sort((a, b) => a - b);
-        const noiseFloor = magSample[Math.floor(magSample.length * 0.5)];
-        if (noiseFloor > 1) {
-            const gate = noiseFloor * 2.5;
-            for (let i = 0; i < nms.length; i++) if (nms[i] < gate) nms[i] = 0;
-        }
-
-        // Stratégie 1 — Canny multi-seuils : le texte du document produit des
-        // gradients très forts qui tirent le percentile vers le haut ; on teste
-        // plusieurs seuils décroissants et on garde tous les quads candidats.
-        const sample = [];
-        for (let i = 0; i < nms.length; i += 7) if (nms[i] > 0) sample.push(nms[i]);
-        sample.sort((a, b) => a - b);
-        if (!sample.length) return null;
-
-        const supportThr = sample[Math.floor(sample.length * 0.25)];
-        const candidates = [];
-        for (const pct of [0.9, 0.78, 0.62, 0.45, 0.3]) {
-            const high = sample[Math.floor(sample.length * pct)];
-            const q = quadFromNms(nms, w, h, high, high * 0.4);
-            if (q) candidates.push(q);
-        }
-
-        // Stratégie 2 — segmentation d'Otsu sur DEUX canaux :
-        // le gris (document = grande région claire) et le canal "papier"
-        // (clair ET peu saturé — sépare une feuille d'un fond coloré de
-        // luminosité proche : bois, nappe…)
-        const otsuQuad = quadFromBrightRegion(gray, w, h);
-        if (otsuQuad) candidates.push(otsuQuad);
-        const paperQuad = quadFromBrightRegion(paperCh, w, h);
-        if (paperQuad) candidates.push(paperQuad);
-
-        // Stratégie 3 — transformée de Hough : les 4 bords en tant que droites
-        // dominantes. Robuste aux coins masqués (doigt) et aux bords interrompus.
-        const houghThr = sample[Math.floor(sample.length * 0.5)];
-        for (const q of houghQuadCandidates(nms, w, h, houghThr)) candidates.push(q);
-
-        // Sélection : angles plausibles + score composite
-        // (aire, adhérence aux gradients, contraste intérieur/extérieur)
-        let best = null, bestScore = 0;
-        for (const q of candidates) {
-            const score = scoreQuadCandidate(q, nms, gray, w, h, supportThr, false);
-            if (score > bestScore) { bestScore = score; best = q; }
-        }
-        // Repli assoupli : mieux vaut un candidat imparfait que la boîte
-        // par défaut que l'utilisateur devra replacer entièrement
-        if (!best) {
-            for (const q of candidates) {
-                const score = scoreQuadCandidate(q, nms, gray, w, h, supportThr, true);
-                if (score > bestScore) { bestScore = score; best = q; }
-            }
-        }
-        if (!best) return null;
-
-        // Raffinement sub-pixel : chaque bord s'aimante sur la crête de
-        // gradient locale, puis les coins sont recalculés par intersection
-        best = refineQuadEdges(best, mag, w, h);
-
-        return orderQuad(best.map(p => ({ x: p[0] / w, y: p[1] / h })));
+        return detectQuadInRGBA(cctx.getImageData(0, 0, w, h).data, w, h);
     } catch (err) {
         console.warn('Détection coins:', err);
         return null;
     }
 }
 
-// Score composite d'un quad candidat
-function scoreQuadCandidate(q, nms, gray, w, h, supportThr, relaxed) {
-    if (!quadAnglesOk(q, relaxed)) return 0;
-    const areaRatio = polygonArea(q) / (w * h);
-    // > 1 possible quand des coins sortent du cadre (feuille coupée)
-    if (areaRatio < (relaxed ? 0.07 : 0.12) || areaRatio > 1.3) return 0;
-    const support = quadEdgeSupport(q, nms, w, h, supportThr);
-    const contrast = quadInsideOutsideContrast(q, gray, w, h);   // 0..1
-    return Math.pow(Math.min(1, areaRatio), 0.6) * (0.25 + support) * (0.55 + 0.45 * contrast);
+function detectDocumentQuad(srcCanvas) {
+    const r = detectDocumentQuadEx(srcCanvas, 420);
+    return r ? r.quad : null;
 }
 
-// L'intérieur d'un document est plus clair que l'extérieur (0..1, 0.5 neutre)
-function quadInsideOutsideContrast(q, gray, w, h) {
-    // Signes des produits vectoriels constants => point dans le quad convexe
-    const inside = (x, y) => {
-        let sign = 0;
-        for (let i = 0; i < 4; i++) {
-            const a = q[i], b = q[(i + 1) % 4];
-            const c = (b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0]);
-            if (c === 0) continue;
-            const s = c > 0 ? 1 : -1;
-            if (!sign) sign = s;
-            else if (s !== sign) return false;
-        }
-        return true;
-    };
-    let sumIn = 0, nIn = 0, sumOut = 0, nOut = 0;
-    const step = Math.max(4, Math.round(Math.min(w, h) / 40));
-    for (let y = 2; y < h - 2; y += step) {
-        for (let x = 2; x < w - 2; x += step) {
-            const g = gray[y * w + x];
-            if (inside(x, y)) { sumIn += g; nIn++; }
-            else { sumOut += g; nOut++; }
-        }
+// Précision au pixel : ré-aimante les bords d'un quad sur une version
+// ~1200 px de la photo (la détection, elle, travaille sur ~420 px)
+function refineDocumentQuad(srcCanvas, quad) {
+    try {
+        const s = Math.min(1, 1200 / Math.max(srcCanvas.width, srcCanvas.height));
+        const w = Math.max(2, Math.round(srcCanvas.width * s));
+        const h = Math.max(2, Math.round(srcCanvas.height * s));
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        const cctx = cv.getContext('2d');
+        cctx.drawImage(srcCanvas, 0, 0, w, h);
+        return refineQuadInRGBA(cctx.getImageData(0, 0, w, h).data, w, h, quad);
+    } catch (err) {
+        console.warn('Raffinement coins:', err);
+        return quad;
     }
-    if (nIn < 8 || nOut < 8) return 0.5;
-    const diff = (sumIn / nIn) - (sumOut / nOut);
-    const c = Math.max(-1, Math.min(1, diff / 60));
-    return (c + 1) / 2;
-}
-
-// Transformée de Hough -> quads candidats par intersections de droites
-function houghQuadCandidates(nms, w, h, thr) {
-    const pts = [];
-    for (let y = 2; y < h - 2; y++) {
-        for (let x = 2; x < w - 2; x++) {
-            if (nms[y * w + x] >= thr) pts.push(x, y);
-        }
-    }
-    const nPts = pts.length / 2;
-    if (nPts < 60) return [];
-    const step = Math.max(1, Math.floor(nPts / 4000));
-
-    const thetaSteps = 120;                       // pas de 1,5°
-    const diag = Math.hypot(w, h);
-    // Bins rho larges : concentre les votes des bords légèrement inclinés
-    // (sinon les lignes de texte, parfaitement horizontales, dominent)
-    const rhoStep = 3;
-    const rhoOff = Math.ceil(diag / rhoStep);     // rho peut être négatif
-    const rhoBins = rhoOff * 2 + 1;
-    const acc = new Int32Array(thetaSteps * rhoBins);
-    const cosT = new Float32Array(thetaSteps), sinT = new Float32Array(thetaSteps);
-    for (let t = 0; t < thetaSteps; t++) {
-        const a = t * Math.PI / thetaSteps;
-        cosT[t] = Math.cos(a); sinT[t] = Math.sin(a);
-    }
-    for (let i = 0; i < nPts; i += step) {
-        const x = pts[i * 2], y = pts[i * 2 + 1];
-        for (let t = 0; t < thetaSteps; t++) {
-            const r = Math.round((x * cosT[t] + y * sinT[t]) / rhoStep) + rhoOff;
-            acc[t * rhoBins + r]++;
-        }
-    }
-
-    // Pics avec suppression locale (±4 bins theta, ±6 bins rho)
-    let maxVotes = 0;
-    for (let i = 0; i < acc.length; i++) if (acc[i] > maxVotes) maxVotes = acc[i];
-    const minVotes = Math.max(20, maxVotes * 0.12);
-    const lines = [];
-    const used = new Uint8Array(acc.length);
-    for (let pick = 0; pick < 24; pick++) {
-        let bi = -1, bv = minVotes - 1;
-        for (let i = 0; i < acc.length; i++) {
-            if (!used[i] && acc[i] > bv) { bv = acc[i]; bi = i; }
-        }
-        if (bi < 0) break;
-        const t = (bi / rhoBins) | 0, r = bi % rhoBins;
-        lines.push({ theta: t * Math.PI / thetaSteps, rho: (r - rhoOff) * rhoStep, votes: bv });
-        for (let dt = -4; dt <= 4; dt++) {
-            // theta est circulaire modulo 180° (rho change de signe)
-            let tt = t + dt, rr0 = r;
-            if (tt < 0) { tt += thetaSteps; rr0 = rhoBins - 1 - r; }
-            if (tt >= thetaSteps) { tt -= thetaSteps; rr0 = rhoBins - 1 - r; }
-            for (let dr = -6; dr <= 6; dr++) {
-                const rr = rr0 + dr;
-                if (rr >= 0 && rr < rhoBins) used[tt * rhoBins + rr] = 1;
-            }
-        }
-    }
-    houghQuadCandidates._lastLines = lines;   // introspection (tests/diagnostic)
-    if (lines.length < 4) return [];
-
-    // Paires de droites ~parallèles suffisamment écartées
-    const angDist = (a, b) => {
-        let d = Math.abs(a - b) % Math.PI;
-        return Math.min(d, Math.PI - d);
-    };
-    const pairs = [];
-    for (let i = 0; i < lines.length; i++) {
-        for (let j = i + 1; j < lines.length; j++) {
-            if (angDist(lines[i].theta, lines[j].theta) > 0.5) continue;   // ~28°
-            if (Math.abs(Math.abs(lines[i].rho) - Math.abs(lines[j].rho)) < Math.min(w, h) * 0.25) continue;
-            pairs.push([lines[i], lines[j]]);
-        }
-    }
-
-    // Intersection de deux droites (theta, rho)
-    const inter = (l1, l2) => {
-        const d = Math.sin(l2.theta - l1.theta);
-        if (Math.abs(d) < 1e-6) return null;
-        const x = (l1.rho * Math.sin(l2.theta) - l2.rho * Math.sin(l1.theta)) / d;
-        const y = (l2.rho * Math.cos(l1.theta) - l1.rho * Math.cos(l2.theta)) / d;
-        return [x, y];
-    };
-
-    const quads = [];
-    // Marge hors cadre généreuse : une feuille dont les coins sortent de la
-    // photo (cadrage serré, très fréquent) reste détectable — les coins
-    // seront ramenés au bord de l'image par le raffinement
-    const m = Math.round(0.12 * Math.max(w, h));
-    for (let a = 0; a < pairs.length && quads.length < 160; a++) {
-        for (let b = a + 1; b < pairs.length && quads.length < 160; b++) {
-            const [A1, A2] = pairs[a], [B1, B2] = pairs[b];
-            if (A1 === B1 || A1 === B2 || A2 === B1 || A2 === B2) continue;
-            // Croisement des familles : min des distances angulaires entre
-            // combinaisons (la moyenne naïve échoue au passage 0°/180°)
-            const cross = Math.min(
-                angDist(A1.theta, B1.theta), angDist(A1.theta, B2.theta),
-                angDist(A2.theta, B1.theta), angDist(A2.theta, B2.theta)
-            );
-            if (cross < 0.87) continue;   // familles à ~50° minimum
-            const c1 = inter(A1, B1), c2 = inter(A1, B2), c3 = inter(A2, B2), c4 = inter(A2, B1);
-            if (!c1 || !c2 || !c3 || !c4) continue;
-            const quad = [c1, c2, c3, c4];
-            let ok = true;
-            for (const c of quad) {
-                if (c[0] < -m || c[0] > w + m || c[1] < -m || c[1] > h + m) { ok = false; break; }
-            }
-            if (ok) quads.push(quad);
-        }
-    }
-    return quads;
-}
-
-// Raffinement : aimante chaque bord sur la crête de gradient la plus proche,
-// ajuste une droite (moindres carrés totaux), recalcule les coins
-function refineQuadEdges(quad, mag, w, h) {
-    const sampleMag = (x, y) => {
-        if (x < 0 || y < 0 || x > w - 2 || y > h - 2) return 0;
-        const x0 = x | 0, y0 = y | 0, fx = x - x0, fy = y - y0;
-        const i = y0 * w + x0;
-        return mag[i] * (1 - fx) * (1 - fy) + mag[i + 1] * fx * (1 - fy)
-             + mag[i + w] * (1 - fx) * fy + mag[i + w + 1] * fx * fy;
-    };
-    let corners = quad.map(p => [p[0], p[1]]);
-
-    for (let iter = 0; iter < 2; iter++) {
-        const edgeLines = [];
-        for (let e = 0; e < 4; e++) {
-            const a = corners[e], b = corners[(e + 1) % 4];
-            const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-            if (len < 12) return quad;
-            const nx = -(b[1] - a[1]) / len, ny = (b[0] - a[0]) / len;
-            const fit = [];
-            for (let k = 2; k <= 12; k++) {
-                const t = k / 14;
-                const px = a[0] + (b[0] - a[0]) * t;
-                const py = a[1] + (b[1] - a[1]) * t;
-                let bestS = 0, bestV = -1;
-                for (let sd = -5; sd <= 5; sd += 0.5) {
-                    const v = sampleMag(px + nx * sd, py + ny * sd);
-                    if (v > bestV) { bestV = v; bestS = sd; }
-                }
-                if (bestV > 10) fit.push([px + nx * bestS, py + ny * bestS]);
-            }
-            if (fit.length >= 5) {
-                // Moindres carrés totaux : point moyen + direction principale
-                let mx = 0, my = 0;
-                for (const p of fit) { mx += p[0]; my += p[1]; }
-                mx /= fit.length; my /= fit.length;
-                let sxx = 0, sxy = 0, syy = 0;
-                for (const p of fit) {
-                    const dx = p[0] - mx, dy = p[1] - my;
-                    sxx += dx * dx; sxy += dx * dy; syy += dy * dy;
-                }
-                const ang = 0.5 * Math.atan2(2 * sxy, sxx - syy);
-                edgeLines.push({ px: mx, py: my, dx: Math.cos(ang), dy: Math.sin(ang) });
-            } else {
-                edgeLines.push({ px: a[0], py: a[1], dx: (b[0] - a[0]) / len, dy: (b[1] - a[1]) / len });
-            }
-        }
-        // Coins = intersections des bords adjacents (coin e : bords e-1 et e)
-        const next = [];
-        for (let e = 0; e < 4; e++) {
-            const l1 = edgeLines[(e + 3) % 4], l2 = edgeLines[e];
-            const det = l1.dx * l2.dy - l1.dy * l2.dx;
-            if (Math.abs(det) < 1e-6) { next.push(corners[e]); continue; }
-            const t = ((l2.px - l1.px) * l2.dy - (l2.py - l1.py) * l2.dx) / det;
-            const ix = l1.px + l1.dx * t, iy = l1.py + l1.dy * t;
-            // Garde-fou : un coin raffiné ne doit pas s'éloigner de plus de 12px
-            if (Math.hypot(ix - corners[e][0], iy - corners[e][1]) > 12) next.push(corners[e]);
-            else next.push([ix, iy]);
-        }
-        corners = next;
-    }
-    return corners.map(c => [
-        Math.min(w - 1, Math.max(0, c[0])),
-        Math.min(h - 1, Math.max(0, c[1]))
-    ]);
-}
-
-// Segmentation de la région claire (Otsu) -> plus grande composante -> quad
-function quadFromBrightRegion(gray, w, h) {
-    const hist = new Float64Array(256);
-    for (let i = 0; i < gray.length; i++) {
-        const g = gray[i] < 0 ? 0 : gray[i] > 255 ? 255 : gray[i] | 0;
-        hist[g]++;
-    }
-    const total = gray.length;
-    let sum = 0;
-    for (let t = 0; t < 256; t++) sum += t * hist[t];
-    let sumB = 0, wB = 0, maxVar = 0, thresh = 127;
-    for (let t = 0; t < 256; t++) {
-        wB += hist[t];
-        if (!wB) continue;
-        const wF = total - wB;
-        if (!wF) break;
-        sumB += t * hist[t];
-        const mB = sumB / wB, mF = (sum - sumB) / wF;
-        const v = wB * wF * (mB - mF) * (mB - mF);
-        if (v > maxVar) { maxVar = v; thresh = t; }
-    }
-
-    const mask = new Uint8Array(w * h);
-    for (let i = 0; i < gray.length; i++) mask[i] = gray[i] > thresh ? 1 : 0;
-
-    // Plus grande composante claire
-    const seen = new Uint8Array(w * h);
-    let bestQuad = null, bestArea = 0;
-    for (let i = 0; i < mask.length; i++) {
-        if (!mask[i] || seen[i]) continue;
-        const pts = [];
-        const st = [i]; seen[i] = 1;
-        while (st.length) {
-            const c = st.pop();
-            const cy = (c / w) | 0, cx = c % w;
-            pts.push([cx, cy]);
-            for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-                const ny = cy + dy, nx2 = cx + dx;
-                if (ny < 0 || ny >= h || nx2 < 0 || nx2 >= w) continue;
-                const n = ny * w + nx2;
-                if (mask[n] && !seen[n]) { seen[n] = 1; st.push(n); }
-            }
-        }
-        if (pts.length < w * h * 0.12) continue;
-        const hull = convexHull(pts);
-        if (hull.length < 4) continue;
-        const quad = hullToQuad(hull);
-        if (!quad) continue;
-        const qa = polygonArea(quad);
-        // La composante doit remplir son quad (rejette les fonds clairs troués)
-        if (qa < w * h * 0.15 || pts.length < qa * 0.55) continue;
-        if (qa > bestArea) { bestArea = qa; bestQuad = quad; }
-    }
-    return bestQuad;
-}
-
-// Angles internes plausibles pour une feuille photographiée
-// (32°..148°, ou 24°..156° en mode assoupli)
-function quadAnglesOk(quad, relaxed) {
-    const lo = relaxed ? 24 : 32, hi = relaxed ? 156 : 148;
-    for (let i = 0; i < 4; i++) {
-        const p = quad[(i + 3) % 4], q = quad[i], r = quad[(i + 1) % 4];
-        const v1x = p[0] - q[0], v1y = p[1] - q[1];
-        const v2x = r[0] - q[0], v2y = r[1] - q[1];
-        const n1 = Math.hypot(v1x, v1y), n2 = Math.hypot(v2x, v2y);
-        if (n1 < 4 || n2 < 4) return false;
-        const cos = (v1x * v2x + v1y * v2y) / (n1 * n2);
-        const ang = Math.acos(Math.max(-1, Math.min(1, cos))) * 180 / Math.PI;
-        if (ang < lo || ang > hi) return false;
-    }
-    return true;
-}
-
-// Adhérence du quad aux gradients, robuste à l'occlusion : le support est
-// calculé PAR BORD, puis pondéré en faveur des 3 meilleurs bords — un doigt
-// qui masque un coin ne disqualifie plus le bon quadrilatère
-function quadEdgeSupport(quad, nms, w, h, thr) {
-    const edgeSupports = [];
-    for (let e = 0; e < 4; e++) {
-        const a = quad[e], b = quad[(e + 1) % 4];
-        const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-        const steps = Math.max(8, Math.round(len / 2));
-        let hit = 0, tot = 0;
-        for (let s = 0; s <= steps; s++) {
-            const t = s / steps;
-            const x = Math.round(a[0] + (b[0] - a[0]) * t);
-            const y = Math.round(a[1] + (b[1] - a[1]) * t);
-            tot++;
-            let found = 0;
-            for (let dy = -2; dy <= 2 && !found; dy++) {
-                for (let dx = -2; dx <= 2; dx++) {
-                    const yy = y + dy, xx = x + dx;
-                    if (yy < 0 || yy >= h || xx < 0 || xx >= w) continue;
-                    if (nms[yy * w + xx] >= thr) { found = 1; break; }
-                }
-            }
-            hit += found;
-        }
-        edgeSupports.push(tot ? hit / tot : 0);
-    }
-    edgeSupports.sort((a, b) => a - b);
-    return 0.8 * (edgeSupports[1] + edgeSupports[2] + edgeSupports[3]) / 3
-         + 0.2 * edgeSupports[0];
-}
-
-// Hystérésis + composantes connexes + enveloppe convexe -> meilleur quad
-function quadFromNms(nms, w, h, high, low) {
-    const edges = new Uint8Array(w * h);
-    const stack = [];
-    for (let i = 0; i < nms.length; i++) {
-        if (nms[i] >= high && !edges[i]) {
-            edges[i] = 1; stack.push(i);
-            while (stack.length) {
-                const c = stack.pop();
-                const cy = (c / w) | 0, cx = c % w;
-                for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-                    const ny = cy + dy, nx2 = cx + dx;
-                    if (ny < 0 || ny >= h || nx2 < 0 || nx2 >= w) continue;
-                    const n = ny * w + nx2;
-                    if (!edges[n] && nms[n] >= low) { edges[n] = 1; stack.push(n); }
-                }
-            }
-        }
-    }
-
-    // Dilatation 3x3 (referme les petites coupures)
-    const dil = new Uint8Array(w * h);
-    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
-        const i = y * w + x;
-        if (edges[i] || edges[i - 1] || edges[i + 1] || edges[i - w] || edges[i + w]) dil[i] = 1;
-    }
-
-    // Composantes connexes -> quad candidat par enveloppe convexe
-    const seen = new Uint8Array(w * h);
-    const totalArea = w * h;
-    let best = null, bestArea = 0;
-    for (let i = 0; i < dil.length; i++) {
-        if (!dil[i] || seen[i]) continue;
-        const pts = [];
-        const st = [i]; seen[i] = 1;
-        let minX = w, maxX = 0, minY = h, maxY = 0;
-        while (st.length) {
-            const c = st.pop();
-            const cy = (c / w) | 0, cx = c % w;
-            pts.push([cx, cy]);
-            if (cx < minX) minX = cx; if (cx > maxX) maxX = cx;
-            if (cy < minY) minY = cy; if (cy > maxY) maxY = cy;
-            for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-                const ny = cy + dy, nx2 = cx + dx;
-                if (ny < 0 || ny >= h || nx2 < 0 || nx2 >= w) continue;
-                const n = ny * w + nx2;
-                if (dil[n] && !seen[n]) { seen[n] = 1; st.push(n); }
-            }
-        }
-        const bboxArea = (maxX - minX) * (maxY - minY);
-        if (bboxArea < totalArea * 0.2) continue;
-
-        const hull = convexHull(pts);
-        if (hull.length < 4) continue;
-        const quad = hullToQuad(hull);
-        if (!quad) continue;
-        const qa = polygonArea(quad);
-        if (qa < totalArea * 0.2) continue;
-        // Le quad doit remplir raisonnablement sa propre bbox (rejette les "L")
-        if (qa < bboxArea * 0.5) continue;
-        if (qa > bestArea) { bestArea = qa; best = quad; }
-    }
-    return best;
-}
-
-function gaussianBlur5(src, w, h) {
-    // Noyau séparable [1,4,6,4,1]/16
-    const k = [1 / 16, 4 / 16, 6 / 16, 4 / 16, 1 / 16];
-    const tmp = new Float32Array(w * h);
-    const out = new Float32Array(w * h);
-    for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-            let s = 0;
-            for (let j = -2; j <= 2; j++) {
-                const xx = Math.min(w - 1, Math.max(0, x + j));
-                s += src[y * w + xx] * k[j + 2];
-            }
-            tmp[y * w + x] = s;
-        }
-    }
-    for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-            let s = 0;
-            for (let j = -2; j <= 2; j++) {
-                const yy = Math.min(h - 1, Math.max(0, y + j));
-                s += tmp[yy * w + x] * k[j + 2];
-            }
-            out[y * w + x] = s;
-        }
-    }
-    return out;
-}
-
-// Enveloppe convexe (monotone chain) — points [[x,y],...]
-function convexHull(points) {
-    if (points.length < 3) return points.slice();
-    const pts = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-    const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
-    const lower = [];
-    for (const p of pts) {
-        while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
-        lower.push(p);
-    }
-    const upper = [];
-    for (let i = pts.length - 1; i >= 0; i--) {
-        const p = pts[i];
-        while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
-        upper.push(p);
-    }
-    lower.pop(); upper.pop();
-    return lower.concat(upper);
-}
-
-// Réduire l'enveloppe à 4 sommets: on retire itérativement le sommet
-// dont la suppression modifie le moins l'aire (décimation)
-function hullToQuad(hull) {
-    let poly = hull.slice();
-    while (poly.length > 4) {
-        let minLoss = Infinity, minIdx = -1;
-        for (let i = 0; i < poly.length; i++) {
-            const a = poly[(i - 1 + poly.length) % poly.length];
-            const b = poly[i];
-            const c = poly[(i + 1) % poly.length];
-            const loss = Math.abs((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])) / 2;
-            if (loss < minLoss) { minLoss = loss; minIdx = i; }
-        }
-        poly.splice(minIdx, 1);
-    }
-    return poly.length === 4 ? poly : null;
-}
-
-function polygonArea(poly) {
-    let a = 0;
-    for (let i = 0; i < poly.length; i++) {
-        const p = poly[i], q = poly[(i + 1) % poly.length];
-        a += p[0] * q[1] - q[0] * p[1];
-    }
-    return Math.abs(a) / 2;
-}
-
-// Ordonner TL, TR, BR, BL
-function orderQuad(quad) {
-    const pts = quad.map(p => (p.x !== undefined ? p : { x: p[0], y: p[1] }));
-    const tl = pts.reduce((m, p) => (p.x + p.y < m.x + m.y ? p : m));
-    const br = pts.reduce((m, p) => (p.x + p.y > m.x + m.y ? p : m));
-    const tr = pts.reduce((m, p) => (p.x - p.y > m.x - m.y ? p : m));
-    const bl = pts.reduce((m, p) => (p.x - p.y < m.x - m.y ? p : m));
-    return [tl, tr, br, bl];
 }
 
 // ---------- Homographie + redressement ----------
@@ -4618,7 +4533,7 @@ if (scanAddPageBtn) {
         if (!scanResultCanvas || !scanResultCanvas.width) return;
         scanState.pages.push(scanSnapshotCurrentPage());
         scanRefreshPagesStrip();
-        scanShowStep('capture');
+        scanStartCapture();
     });
 }
 
