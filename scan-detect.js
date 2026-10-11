@@ -5,6 +5,25 @@
 // bloquer l'interface (le cadre bleu reste fluide).
 // ==============================================
 
+// Réglages de la détection, calibrés sur des photos réelles de documents
+// (reçus froissés, feuilles sur parquet clair, bureaux encombrés…) et sur
+// des scènes de synthèse
+const SCAN_DETECT = {
+    contrast: 6,         // écart min de luminosité de part et d'autre d'un bord
+    inverted: 0.7,       // poids d'un bord inversé (feuille à l'ombre, plus sombre que le fond)
+    minNormal: 0.6,      // part minimale de bords « normaux » sur le contour
+    presence: 1.5,       // tolérance de position d'un bord le long de la normale (px)
+    orientCos: 0.9,      // gradient ~perpendiculaire au côté (cosinus de l'écart max)
+    edgeMin: 14,         // magnitude min d'un bord…
+    edgeSigma: 4,        // … et en multiples de l'écart-type du bruit
+    houghMin: 0.07,      // votes min d'une droite (fraction du petit côté)
+    houghKeep: 48,       // droites conservées
+    houghSpread: 6,      // demi-fenêtre de vote angulaire (degrés) : l'orientation
+                         // d'un bord peu contrasté est bruitée de plusieurs degrés
+    worstWeight: 0.5,    // poids du pire côté dans la preuve de bord
+    overshoot: 0.4       // pénalité d'un bord prolongé au-delà d'un coin
+};
+
 // Niveaux de gris + gradients de Sobel BI-CANAUX : gris, et canal "papier"
 // (clair ET peu saturé) qui révèle les bords que la seule luminance ne voit
 // pas (feuille blanche sur fond coloré de luminosité proche). À chaque pixel
@@ -105,7 +124,7 @@ function detectQuadInRGBA(data, w, h) {
         // Seuil de "bord présent" : bas (un bord de feuille sur fond clair
         // est faible comparé au texte) mais au-dessus du bruit — la polarité
         // exigée en plus écarte les faux bords
-        const edgeThr = Math.max(14, sigma * 4);
+        const edgeThr = Math.max(SCAN_DETECT.edgeMin, sigma * SCAN_DETECT.edgeSigma);
         const ctx = {
             gray, paperCh, nms, gx, gy, w, h, edgeThr,
             off: Math.max(2, Math.round(Math.min(w, h) * 0.015))
@@ -193,30 +212,35 @@ function scoreQuadCandidate(q, ctx, relaxed) {
     // L'aire compte peu : c'est la preuve de bord qui départage (sinon un
     // quad débordant sur le fond jusqu'à une limite d'ombre l'emporterait)
     return Math.pow(Math.min(1, areaRatio), 0.35) * (0.1 + evidence)
-         * (0.6 + 0.4 * contrast) * (1 - 0.4 * overshoot);
+         * (0.6 + 0.4 * contrast) * (1 - SCAN_DETECT.overshoot * overshoot);
 }
 
-// Un point (px,py) est-il sur un VRAI bord de feuille de normale intérieure
-// (nx,ny) ? Bord présent à ±1 px, orienté comme le côté, et intérieur plus
-// clair et/ou moins saturé que l'extérieur. Les faux bords — dernière ligne de
-// texte, cadre d'un tableau imprimé, carreaux de la nappe — échouent.
-function isPaperEdgeAt(px, py, nx, ny, ctx) {
+// Bord de feuille au point (px,py), pour un côté de normale intérieure
+// (nx,ny) : contraste net de part et d'autre (une fine ligne imprimée, avec du
+// papier des deux côtés, est rejetée) et gradient présent à ±presence px,
+// perpendiculaire au côté. Retour : 1 = bord « normal » (papier plus clair à
+// l'intérieur), -1 = bord inversé (feuille à l'ombre sur un fond clair),
+// 0 = pas de bord, null = hors de l'image.
+function edgeSignAt(px, py, nx, ny, ctx) {
     const { gray, paperCh, nms, gx, gy, w, h, edgeThr, off } = ctx;
     const xi = Math.round(px + nx * off), yi = Math.round(py + ny * off);
     const xo = Math.round(px - nx * off), yo = Math.round(py - ny * off);
-    if (xi < 0 || yi < 0 || xi >= w || yi >= h || xo < 0 || yo < 0 || xo >= w || yo >= h) return -1;
+    if (xi < 0 || yi < 0 || xi >= w || yi >= h || xo < 0 || yo < 0 || xo >= w || yo >= h) return null;
     const ii = yi * w + xi, io = yo * w + xo;
-    if (gray[ii] - gray[io] <= 10 && paperCh[ii] - paperCh[io] <= 10) return 0;
-    for (let d = -1.5; d <= 1.5; d += 0.75) {
+    const con = SCAN_DETECT.contrast, win = SCAN_DETECT.presence, cmin = SCAN_DETECT.orientCos;
+    if (Math.abs(gray[ii] - gray[io]) <= con && Math.abs(paperCh[ii] - paperCh[io]) <= con) return 0;
+    let found = 0;
+    for (let d = -win; d <= win; d += 0.75) {
         const x = Math.round(px + nx * d), y = Math.round(py + ny * d);
         if (x < 1 || y < 1 || x >= w - 1 || y >= h - 1) continue;
         const i = y * w + x;
         const m = nms[i];
         if (m < edgeThr) continue;
-        // Gradient ~ perpendiculaire au côté (±25°), orienté vers le papier
-        if ((gx[i] * nx + gy[i] * ny) >= 0.9 * m) return 1;
+        const c = (gx[i] * nx + gy[i] * ny) / m;
+        if (c >= cmin) return 1;
+        if (c <= -cmin) found = -1;
     }
-    return 0;
+    return found;
 }
 
 // Preuve de bord d'un quad (0..1) : fraction des points de chaque côté qui
@@ -229,6 +253,7 @@ function quadEdgeEvidence(q, ctx) {
     let cx = 0, cy = 0;
     for (const p of q) { cx += p[0] / 4; cy += p[1] / 4; }
     const per = [], lum = [];
+    let sumOk = 0, sumInv = 0;
     for (let e = 0; e < 4; e++) {
         const a = q[e], b = q[(e + 1) % 4];
         const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
@@ -237,18 +262,24 @@ function quadEdgeEvidence(q, ctx) {
         const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
         if ((cx - mx) * nx + (cy - my) * ny < 0) { nx = -nx; ny = -ny; }   // vers l'intérieur
         const steps = Math.max(16, Math.round(len / 1.5));
-        let ok = 0, tot = 0;
+        let ok = 0, inv = 0, tot = 0;
         const inside = [];
         for (let k = 0; k <= steps; k++) {
             const t = 0.05 + 0.9 * k / steps;
             const px = a[0] + (b[0] - a[0]) * t, py = a[1] + (b[1] - a[1]) * t;
-            const r = isPaperEdgeAt(px, py, nx, ny, ctx);
-            if (r < 0) continue;
-            tot++; ok += r;
+            const r = edgeSignAt(px, py, nx, ny, ctx);
+            if (r === null) continue;
+            tot++;
+            if (r > 0) ok++; else if (r < 0) inv++;
             const xi = Math.round(px + nx * off * 2), yi = Math.round(py + ny * off * 2);
             if (xi >= 0 && yi >= 0 && xi < w && yi < h) inside.push(gray[yi * w + xi]);
         }
-        per.push(tot >= (steps + 1) * 0.3 ? ok / tot : 0.25);
+        if (tot >= (steps + 1) * 0.3) {
+            per.push((ok + SCAN_DETECT.inverted * inv) / tot);
+            sumOk += ok; sumInv += inv;
+        } else {
+            per.push(0.25);
+        }
         inside.sort((x, y) => x - y);
         lum.push(inside.length ? inside[inside.length >> 1] : -1);
     }
@@ -256,7 +287,7 @@ function quadEdgeEvidence(q, ctx) {
     for (let e = 0; e < 4; e++) {
         if (lum[e] >= 0 && maxLum > 0) per[e] *= Math.min(1, lum[e] / (0.7 * maxLum));
     }
-    return edgeEvidenceAggregate(per);
+    return edgeEvidenceAggregate(per) * normalShareFactor(sumOk, sumInv);
 }
 
 // Dépassement aux coins : sur un vrai coin de feuille, les deux bords
@@ -283,9 +314,9 @@ function quadCornerOvershoot(q, ctx) {
         for (const [ox, oy, dir] of [[b[0], b[1], 1], [a[0], a[1], -1]]) {
             let ok = 0, tot = 0;
             for (let sd = start; sd <= start + ext; sd += 1) {
-                const r = isPaperEdgeAt(ox + ux * sd * dir, oy + uy * sd * dir, nx, ny, ctx);
-                if (r < 0) continue;
-                tot++; ok += r;
+                const r = edgeSignAt(ox + ux * sd * dir, oy + uy * sd * dir, nx, ny, ctx);
+                if (r === null) continue;
+                tot++; ok += r > 0 ? 1 : 0;   // bord de papier « normal » seulement
             }
             if (tot < 5) continue;
             worst = Math.max(worst, ok / tot);
@@ -300,11 +331,19 @@ function quadCornerOvershoot(q, ctx) {
     return { worst, partial };
 }
 
+// Une feuille est, sur l'essentiel de son contour, plus claire que le fond :
+// un contour majoritairement inversé est suspect (bloc de texte, objet sombre)
+function normalShareFactor(ok, inv) {
+    if (ok + inv <= 0) return 1;
+    return Math.min(1, (ok / (ok + inv)) / SCAN_DETECT.minNormal);
+}
+
 // Agrégat des 4 côtés : moyenne, modulée par le pire côté (un coin masqué par
 // un doigt coûte un peu, un côté faux coûte beaucoup)
 function edgeEvidenceAggregate(per) {
     const mean = (per[0] + per[1] + per[2] + per[3]) / 4;
-    return mean * (0.5 + 0.5 * Math.min(per[0], per[1], per[2], per[3]));
+    const ww = SCAN_DETECT.worstWeight;
+    return mean * (1 - ww + ww * Math.min(per[0], per[1], per[2], per[3]));
 }
 
 // L'intérieur d'un document est plus clair que l'extérieur (0..1, 0.5 neutre)
@@ -348,6 +387,7 @@ function orientedHoughLines(ctx) {
     const rhoOff = Math.ceil(diag / rhoStep);
     const rhoBins = rhoOff * 2 + 1;
     const acc = new Float32Array(thetaSteps * rhoBins);
+    const spread = SCAN_DETECT.houghSpread;
     const cosT = new Float32Array(thetaSteps), sinT = new Float32Array(thetaSteps);
     for (let t = 0; t < thetaSteps; t++) {
         const a = t * Math.PI / thetaSteps;
@@ -360,16 +400,16 @@ function orientedHoughLines(ctx) {
             let a = Math.atan2(gy[i], gx[i]);
             if (a < 0) a += Math.PI;                  // normale modulo 180°
             const t0 = Math.round(a * thetaSteps / Math.PI);
-            for (let dt = -2; dt <= 2; dt++) {
+            for (let dt = -spread; dt <= spread; dt++) {
                 let t = t0 + dt;
                 if (t < 0) t += thetaSteps; else if (t >= thetaSteps) t -= thetaSteps;
                 const r = Math.round((x * cosT[t] + y * sinT[t]) / rhoStep) + rhoOff;
-                acc[t * rhoBins + r] += dt === 0 ? 1 : Math.abs(dt) === 1 ? 0.75 : 0.4;
+                acc[t * rhoBins + r] += 1 - Math.abs(dt) / (spread + 1);
             }
         }
     }
     // Maxima locaux (fenêtre ±3°, ±3 bins rho ; theta circulaire)
-    const minVotes = Math.min(w, h) * 0.12;
+    const minVotes = Math.min(w, h) * SCAN_DETECT.houghMin;
     const peaks = [];
     for (let t = 0; t < thetaSteps; t++) {
         for (let r = 1; r < rhoBins - 1; r++) {
@@ -393,7 +433,7 @@ function orientedHoughLines(ctx) {
         }
     }
     peaks.sort((a, b) => b.votes - a.votes);
-    return peaks.slice(0, 36);
+    return peaks.slice(0, SCAN_DETECT.houghKeep);
 }
 
 // Tous les quadrilatères formés par deux paires de droites ~parallèles,
@@ -412,11 +452,11 @@ function quadsFromLines(lines, ctx, keep) {
         for (let k = 0; k < n; k++) {
             const s = k - R;
             const px = L.rho * nx + s * dx, py = L.rho * ny + s * dy;
+            // pos : bord normal pour un intérieur côté +n (= inversé côté -n)
             let p = 0, q = 0, inside = 0;
             if (px >= 2 && py >= 2 && px <= w - 3 && py <= h - 3) {
-                const rp = isPaperEdgeAt(px, py, nx, ny, ctx);
-                const rn = isPaperEdgeAt(px, py, -nx, -ny, ctx);
-                if (rp >= 0 && rn >= 0) { inside = 1; p = rp; q = rn; }
+                const r = edgeSignAt(px, py, nx, ny, ctx);
+                if (r !== null) { inside = 1; p = r > 0 ? 1 : 0; q = r < 0 ? 1 : 0; }
             }
             pos[k + 1] = pos[k] + p; neg[k + 1] = neg[k] + q; img[k + 1] = img[k] + inside;
         }
@@ -452,9 +492,12 @@ function quadsFromLines(lines, ctx, keep) {
         const inImg = L.img[hi] - L.img[lo];
         if (inImg < Math.max(4, (hi - lo) * 0.3)) return 0.25;   // côté hors image
         const insidePlus = cx * L.nx + cy * L.ny - L.rho > 0;
-        const good = insidePlus ? L.pos[hi] - L.pos[lo] : L.neg[hi] - L.neg[lo];
-        return good / inImg;
+        const nPos = L.pos[hi] - L.pos[lo], nNeg = L.neg[hi] - L.neg[lo];
+        const ok = insidePlus ? nPos : nNeg, inv = insidePlus ? nNeg : nPos;
+        tally.ok += ok; tally.inv += inv;
+        return (ok + SCAN_DETECT.inverted * inv) / inImg;
     };
+    const tally = { ok: 0, inv: 0 };
     const m = 0.12 * Math.max(w, h);
     const minArea = w * h * 0.1;
     const top = [];
@@ -478,10 +521,11 @@ function quadsFromLines(lines, ctx, keep) {
             const area = polygonArea(quad);
             if (area < minArea || !quadAnglesOk(quad, false)) continue;
             const cx = (c1[0] + c2[0] + c3[0] + c4[0]) / 4, cy = (c1[1] + c2[1] + c3[1] + c4[1]) / 4;
+            tally.ok = tally.inv = 0;
             const ev = edgeEvidenceAggregate([
                 sideQuality(B1, c1, c2, cx, cy), sideQuality(A2, c2, c3, cx, cy),
                 sideQuality(B2, c3, c4, cx, cy), sideQuality(A1, c4, c1, cx, cy)
-            ]);
+            ]) * normalShareFactor(tally.ok, tally.inv);
             if (ev < 0.3) continue;
             const score = Math.pow(Math.min(1, area / (w * h)), 0.35) * ev;
             if (top.length < keep || score > top[top.length - 1].score) {

@@ -42,6 +42,12 @@
         <span>Hors ligne</span>
     </div>
 
+    <!-- Nouvelle version disponible (service worker mis à jour) -->
+    <button id="update-banner" class="update-banner" type="button" style="display:none">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
+        <span>Nouvelle version — Mettre à jour</span>
+    </button>
+
     <!-- Bannière install iOS Safari (affichée automatiquement) -->
     <div id="ios-safari-banner" class="ios-safari-banner" style="display:none">
         <div class="ios-safari-banner-content">
@@ -546,7 +552,7 @@
         </main>
 
         <footer>
-            <p>&copy; 2026 Application de signature <span class="app-version">v1.0.3</span></p>
+            <p>&copy; 2026 Application de signature <span class="app-version">v1.0.4</span></p>
         </footer>
     </div>
 
@@ -600,9 +606,37 @@
     <script>
     // Enregistrement du service worker
     if ('serviceWorker' in navigator) {
+        // Mise a jour : la page deja ouverte execute encore l'ancien code.
+        // Nouvelle version installee au demarrage (avant toute action) :
+        // rechargement immediat. Sinon : bouton « Mettre a jour », pour ne
+        // jamais perdre un document en cours.
+        const swHadController = !!navigator.serviceWorker.controller;
+        const swStart = Date.now();
+        let swUserActed = false, swReloading = false;
+        ['pointerdown', 'keydown'].forEach(ev =>
+            window.addEventListener(ev, () => { swUserActed = true; }, { capture: true, once: true }));
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (!swHadController || swReloading) return;
+            if (!swUserActed && Date.now() - swStart < 15000) {
+                swReloading = true;
+                window.location.reload();
+                return;
+            }
+            const banner = document.getElementById('update-banner');
+            if (banner) banner.style.display = 'inline-flex';
+        });
+        const updateBanner = document.getElementById('update-banner');
+        if (updateBanner) updateBanner.addEventListener('click', () => window.location.reload());
         window.addEventListener('load', () => {
             navigator.serviceWorker.register('sw.js')
-                .then(reg => console.log('[PWA] SW enregistre:', reg.scope))
+                .then(reg => {
+                    console.log('[PWA] SW enregistre:', reg.scope);
+                    // L'app installee reste souvent en memoire : verifier les
+                    // mises a jour a chaque retour au premier plan
+                    document.addEventListener('visibilitychange', () => {
+                        if (!document.hidden) reg.update().catch(() => {});
+                    });
+                })
                 .catch(err => console.warn('[PWA] SW echec:', err));
         });
     }
