@@ -540,6 +540,21 @@ body.scan-cam-open { overflow: hidden; }
     fill: rgba(10,132,255,.4);
     stroke-width: 4;
 }
+/* Version + diagnostic discret de la caméra (aide au dépannage à distance) */
+.scan-version {
+    font-size: .72em; font-weight: 600;
+    color: var(--label-2);
+    background: var(--bg-input);
+    padding: 2px 8px; border-radius: 980px;
+}
+.scan-cam-diag {
+    position: absolute; left: 10px; bottom: 8px;
+    font-size: 10.5px; line-height: 1.2;
+    color: rgba(255,255,255,.55);
+    text-shadow: 0 1px 2px rgba(0,0,0,.8);
+    pointer-events: none;
+    font-variant-numeric: tabular-nums;
+}
 .scan-cam-status {
     position: absolute; top: 12px; left: 50%;
     transform: translateX(-50%);
@@ -617,6 +632,10 @@ body.scan-cam-open { overflow: hidden; }
 }
 .scan-step-label { font-size: .88em; color: var(--label-2); margin-bottom: 10px; }
 .scan-step-label strong { color: var(--blue); }
+.scan-detect-info { font-size: .78em; color: var(--label-2); margin: -4px 0 10px; }
+.scan-detect-info:empty { display: none; }
+.scan-detect-info.ok::before { content: '● '; color: var(--green, #34C759); }
+.scan-detect-info.warn::before { content: '● '; color: var(--orange, #FF9500); }
 
 .scan-preview-wrap {
     position: relative;

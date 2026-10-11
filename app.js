@@ -3322,8 +3322,9 @@ async function scanLoadFile(file) {
 
         // Détection automatique des coins (sur version réduite), puis
         // raffinement haute résolution pour un cadrage au pixel près
-        const detected = detectDocumentQuad(src);
-        scanState.quad = detected ? refineDocumentQuad(src, detected) : defaultQuad();
+        const detected = detectDocumentQuadEx(src, 420);
+        scanState.quad = detected ? refineDocumentQuad(src, detected.quad) : defaultQuad();
+        scanSetDetectInfo(detected);
 
         drawScanPreview();
         scanShowStep('adjust');
@@ -3332,6 +3333,23 @@ async function scanLoadFile(file) {
         alert('Impossible de charger cette image: ' + err.message);
     } finally {
         hideLoader();
+    }
+}
+
+// Fiabilité de la détection automatique, affichée à l'étape des coins
+function scanSetDetectInfo(r) {
+    const el = document.getElementById('scan-detect-info');
+    if (!el) return;
+    el.classList.remove('ok', 'warn');
+    if (r && !r.relaxed && !r.partial && r.confidence >= SCAN_AUTO_CONF) {
+        el.textContent = `Bords détectés automatiquement (fiabilité ${Math.round(r.confidence * 100)} %) — vérifiez d'un coup d'œil`;
+        el.classList.add('ok');
+    } else if (r) {
+        el.textContent = `Détection incertaine (fiabilité ${Math.round(r.confidence * 100)} %) — ajustez les coins sur les bords`;
+        el.classList.add('warn');
+    } else {
+        el.textContent = 'Document non détecté — placez les 4 coins sur les bords de la feuille';
+        el.classList.add('warn');
     }
 }
 
@@ -3382,6 +3400,12 @@ const scanCamTorch    = document.getElementById('scan-cam-torch');
 const scanCamPages    = document.getElementById('scan-cam-pages');
 const scanCamMsg      = document.getElementById('scan-cam-msg');
 const SCAN_RING_LEN   = 226.2;   // circonférence de l'anneau du déclencheur
+const scanCamDiag     = document.getElementById('scan-cam-diag');
+// Version affichée (lue dans le pied de page, seule source) : visible en haut
+// du Scanner et dans la caméra, pour vérifier d'un coup d'œil la mise à jour
+const APP_VERSION = ((document.querySelector('.app-version') || {}).textContent || '').trim();
+const scanVersionEl = document.getElementById('scan-version');
+if (scanVersionEl) scanVersionEl.textContent = APP_VERSION;
 
 const scanCam = {
     open: false, stream: null, track: null, torchOn: false,
@@ -3397,6 +3421,7 @@ const scanCam = {
     lastSeen: 0, stableSince: 0, hint: 'search',
     doubts: 0,              // vérifications de cadrage échouées sur ce document
     capturing: false, histPushed: false,
+    nAnalyses: 0, diagAt: 0, lastConf: null,   // diagnostic affiché dans la caméra
     session: 0              // incrémenté à chaque ouverture (flux périmés)
 };
 
@@ -3538,6 +3563,8 @@ function scanCamResetTracking() {
     scanCam.stableSince = performance.now();
     scanCam.hint = 'search';
     scanCam.doubts = 0;
+    scanCam.nAnalyses = 0; scanCam.diagAt = 0; scanCam.lastConf = null;
+    if (scanCamDiag) scanCamDiag.textContent = APP_VERSION;
     if (scanCamOverlay) scanCamOverlay.classList.remove('has-quad', 'locked');
     if (scanCamProgress) scanCamProgress.style.strokeDashoffset = SCAN_RING_LEN;
 }
@@ -3604,6 +3631,8 @@ function scanCamDetectTick() {
     const session = scanCam.session;
     scanCamAnalyzeSource(v, vw, vh, SCAN_LIVE_SIDE, scanCam.frameCv).then(res => {
         if (!scanCam.open || scanCam.capturing || session !== scanCam.session) return;
+        scanCam.nAnalyses++;
+        scanCam.lastConf = res ? res.confidence : null;
         scanCamOnDetection(res, vw, vh);
         if (!scanCam.open || scanCam.capturing) return;
         // ~12 analyses/s au plus : inutile d'aller plus vite que la main
@@ -3743,6 +3772,15 @@ function scanCamRender(ts) {
         scanCamOverlay.classList.remove('has-quad');
     }
     scanCamOverlay.classList.toggle('locked', ready);
+    // Diagnostic (2 fois/s) : version, résolution, cadence d'analyse, fiabilité
+    if (scanCamDiag && now - scanCam.diagAt >= 500) {
+        const rate = scanCam.diagAt ? scanCam.nAnalyses * 1000 / (now - scanCam.diagAt) : 0;
+        const conf = scanCam.lastConf == null ? '—' : Math.round(scanCam.lastConf * 100) + ' %';
+        scanCamDiag.textContent = `${APP_VERSION} · ${vw}×${vh} · ${rate.toFixed(1)} analyses/s · fiabilité ${conf}` +
+            (scanCam.worker ? '' : ' · sans Worker');
+        scanCam.nAnalyses = 0;
+        scanCam.diagAt = now;
+    }
     const progress = scanCam.auto && ready
         ? Math.min(1, (now - scanCam.stableSince) / SCAN_HOLD_MS) : 0;
     if (scanCamProgress) scanCamProgress.style.strokeDashoffset = (SCAN_RING_LEN * (1 - progress)).toFixed(1);
@@ -3828,6 +3866,7 @@ async function scanCamCapture(auto) {
 // l'emporte — puis raffinement au pixel
 function scanResolveQuad(src, tracked, detected) {
     const r = detected !== undefined ? detected : detectDocumentQuadEx(src, 420);
+    scanSetDetectInfo(r);
     const fresh = r && !r.relaxed ? r.quad : null;
     let quad;
     if (tracked && fresh) {
@@ -4104,11 +4143,6 @@ function detectDocumentQuadEx(srcCanvas, maxSide) {
         console.warn('Détection coins:', err);
         return null;
     }
-}
-
-function detectDocumentQuad(srcCanvas) {
-    const r = detectDocumentQuadEx(srcCanvas, 420);
-    return r ? r.quad : null;
 }
 
 // Précision au pixel : ré-aimante les bords d'un quad sur une version

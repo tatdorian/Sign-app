@@ -315,6 +315,7 @@
                 <div class="section-header">
                     <div class="section-title">
                         <h2>Scanner un document</h2>
+                        <span class="scan-version" id="scan-version"></span>
                     </div>
                 </div>
 
@@ -344,6 +345,7 @@
                 <!-- Étape 2 : ajustement des coins -->
                 <div id="scan-adjust" style="display:none">
                     <p class="scan-step-label"><strong>1.</strong> Ajustez les coins sur les bords du document</p>
+                    <p class="scan-detect-info" id="scan-detect-info"></p>
                     <div class="scan-preview-wrap" id="scan-preview-wrap">
                         <canvas id="scan-preview"></canvas>
                         <svg id="scan-quad-svg" xmlns="http://www.w3.org/2000/svg">
@@ -552,7 +554,7 @@
         </main>
 
         <footer>
-            <p>&copy; 2026 Application de signature <span class="app-version">v1.0.4</span></p>
+            <p>&copy; 2026 Application de signature <span class="app-version">v1.0.5</span></p>
         </footer>
     </div>
 
@@ -579,6 +581,7 @@
                 <div class="scan-cam-flash" id="scan-cam-flash"></div>
             </div>
             <div class="scan-cam-status" id="scan-cam-status" aria-live="polite">Ouverture de la caméra…</div>
+            <div class="scan-cam-diag" id="scan-cam-diag" aria-hidden="true"></div>
         </div>
         <div class="scan-cam-bar scan-cam-bottom">
             <button class="scan-cam-btn scan-cam-side" id="scan-cam-gallery" type="button" aria-label="Choisir une image">
