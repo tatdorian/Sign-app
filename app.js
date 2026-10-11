@@ -3364,7 +3364,7 @@ if (scanDrop) {
 // dès que le cadrage est fiable ET immobile. Le cadrage final est recalculé
 // sur la photo pleine résolution.
 const SCAN_LIVE_SIDE = 300;    // résolution d'analyse du flux (px, grand côté)
-const SCAN_SHOW_CONF = 0.5;    // preuve de bord minimale pour afficher le cadre
+const SCAN_SHOW_CONF = 0.55;   // preuve de bord minimale pour afficher le cadre
 const SCAN_AUTO_CONF = 0.65;   // ... et pour déclencher la capture automatique
 const SCAN_HOLD_MS   = 1100;   // durée d'immobilité avant la capture auto
 const SCAN_LOST_MS   = 600;    // cadre masqué après cette durée sans détection
@@ -3387,13 +3387,15 @@ const scanCam = {
     open: false, stream: null, track: null, torchOn: false,
     auto: true,
     unavailable: false,     // getUserMedia refusé/absent -> appareil photo natif
-    worker: null, workerFailed: false, reqId: 0, pending: null,
+    worker: null, workerFailed: false, reqId: 0,
+    pending: new Map(),     // analyses en cours dans le Worker : id -> rappel
     frameCv: null, loopTimer: null, raf: 0, lastTs: 0,
     target: null,           // cadre suivi (lissé), coins normalisés TL,TR,BR,BL
     shown: null,            // cadre affiché (interpolé vers target à chaque image)
     candidate: null,        // nouvelle détection en attente de confirmation
     anchor: null, lastRaw: null,
     lastSeen: 0, stableSince: 0, hint: 'search',
+    doubts: 0,              // vérifications de cadrage échouées sur ce document
     capturing: false, histPushed: false,
     session: 0              // incrémenté à chaque ouverture (flux périmés)
 };
@@ -3520,7 +3522,6 @@ function scanCloseCamera(fromHistory) {
     scanCam.open = false;
     clearTimeout(scanCam.loopTimer);
     cancelAnimationFrame(scanCam.raf);
-    scanCam.pending = null;
     scanCamStopStream();
     scanCamEl.style.display = 'none';
     document.body.classList.remove('scan-cam-open');
@@ -3536,6 +3537,7 @@ function scanCamResetTracking() {
     scanCam.lastSeen = 0;
     scanCam.stableSince = performance.now();
     scanCam.hint = 'search';
+    scanCam.doubts = 0;
     if (scanCamOverlay) scanCamOverlay.classList.remove('has-quad', 'locked');
     if (scanCamProgress) scanCamProgress.style.strokeDashoffset = SCAN_RING_LEN;
 }
@@ -3559,7 +3561,35 @@ function scanCamStartLoops() {
     scanCam.loopTimer = setTimeout(scanCamDetectTick, 150);
 }
 
-// Analyse d'une image du flux (dans le Worker si possible)
+// Analyse d'une image RGBA réduite : dans le Worker si possible (interface
+// fluide), sinon sur le fil principal. Résout avec le résultat ou null.
+function scanCamAnalyze(img, w, h) {
+    const wk = scanCamGetWorker();
+    if (!wk) return Promise.resolve(detectQuadInRGBA(img.data, w, h));
+    return new Promise(resolve => {
+        const id = ++scanCam.reqId;
+        // Garde-fou : un Worker muet ne doit pas figer l'analyse
+        const timer = setTimeout(() => {
+            if (scanCam.pending.delete(id)) resolve(null);
+        }, 2500);
+        scanCam.pending.set(id, (res) => { clearTimeout(timer); resolve(res); });
+        wk.postMessage({ id, type: 'detect', w, h, buffer: img.data.buffer }, [img.data.buffer]);
+    });
+}
+
+// Réduction filtrée d'une image (vidéo ou canvas) puis analyse
+function scanCamAnalyzeSource(source, sw, sh, side, reuseCanvas) {
+    const s = side / Math.max(sw, sh);
+    const w = Math.max(2, Math.round(sw * s)), h = Math.max(2, Math.round(sh * s));
+    const cv = reuseCanvas || document.createElement('canvas');
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+    const cctx = cv.getContext('2d', { willReadFrequently: true });
+    cctx.imageSmoothingQuality = 'high';   // réduction filtrée : bords nets, sans crénelage
+    cctx.drawImage(source, 0, 0, w, h);
+    return scanCamAnalyze(cctx.getImageData(0, 0, w, h), w, h);
+}
+
+// Boucle d'analyse du flux
 function scanCamDetectTick() {
     scanCam.loopTimer = null;
     if (!scanCam.open || !scanCam.stream || scanCam.capturing) return;
@@ -3569,37 +3599,17 @@ function scanCamDetectTick() {
         scanCam.loopTimer = setTimeout(scanCamDetectTick, 100);
         return;
     }
-    const s = SCAN_LIVE_SIDE / Math.max(vw, vh);
-    const w = Math.max(2, Math.round(vw * s)), h = Math.max(2, Math.round(vh * s));
     if (!scanCam.frameCv) scanCam.frameCv = document.createElement('canvas');
-    const cv = scanCam.frameCv;
-    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
-    const cctx = cv.getContext('2d', { willReadFrequently: true });
-    cctx.drawImage(v, 0, 0, w, h);
-    const img = cctx.getImageData(0, 0, w, h);
     const t0 = performance.now();
-    const done = (res) => {
-        if (!scanCam.open || scanCam.capturing) return;
+    const session = scanCam.session;
+    scanCamAnalyzeSource(v, vw, vh, SCAN_LIVE_SIDE, scanCam.frameCv).then(res => {
+        if (!scanCam.open || scanCam.capturing || session !== scanCam.session) return;
         scanCamOnDetection(res, vw, vh);
+        if (!scanCam.open || scanCam.capturing) return;
         // ~12 analyses/s au plus : inutile d'aller plus vite que la main
         const wait = Math.max(0, 80 - (performance.now() - t0));
-        if (scanCam.open && !scanCam.capturing) scanCam.loopTimer = setTimeout(scanCamDetectTick, wait);
-    };
-    const wk = scanCamGetWorker();
-    if (wk) {
-        const id = ++scanCam.reqId;
-        scanCam.pending = { id, done };
-        wk.postMessage({ id, type: 'detect', w, h, buffer: img.data.buffer }, [img.data.buffer]);
-        // Garde-fou : un Worker muet ne doit pas figer l'analyse
-        setTimeout(() => {
-            if (scanCam.pending && scanCam.pending.id === id) {
-                scanCam.pending = null;
-                done(null);
-            }
-        }, 2500);
-    } else {
-        done(detectQuadInRGBA(img.data, w, h));
-    }
+        scanCam.loopTimer = setTimeout(scanCamDetectTick, wait);
+    });
 }
 
 function scanCamGetWorker() {
@@ -3609,8 +3619,8 @@ function scanCamGetWorker() {
         const wk = new Worker('scan-detect.js');
         wk.onmessage = (e) => {
             const m = e.data || {};
-            const p = scanCam.pending;
-            if (p && p.id === m.id) { scanCam.pending = null; p.done(m.result); }
+            const cb = scanCam.pending.get(m.id);
+            if (cb) { scanCam.pending.delete(m.id); cb(m.result); }
         };
         wk.onerror = (e) => {
             // Repli : analyse sur le fil principal
@@ -3618,9 +3628,9 @@ function scanCamGetWorker() {
             scanCam.workerFailed = true;
             wk.terminate();
             scanCam.worker = null;
-            const p = scanCam.pending;
-            scanCam.pending = null;
-            if (p) p.done(null);
+            const cbs = Array.from(scanCam.pending.values());
+            scanCam.pending.clear();
+            cbs.forEach(cb => cb(null));
         };
         scanCam.worker = wk;
     } catch (err) {
@@ -3647,6 +3657,7 @@ function scanCamOnDetection(res, vw, vh) {
             scanCam.target = q;
             scanCam.candidate = null;
             scanCam.anchor = null;
+            scanCam.doubts = 0;
         } else {
             // Saut brusque : à confirmer, et l'immobilité repart de zéro
             scanCam.candidate = q;
@@ -3676,6 +3687,7 @@ function scanCamOnDetection(res, vw, vh) {
             scanCam.target = null;
             scanCam.lastRaw = null;
             scanCam.hint = 'search';
+            scanCam.doubts = 0;
         }
     }
     scanCamUpdateStatus();
@@ -3706,6 +3718,7 @@ function scanCamUpdateStatus() {
     };
     if (scanCam.hint && scanCam.target === null) scanCamSetStatus(msgs.search, false);
     else if (scanCam.hint) scanCamSetStatus(msgs[scanCam.hint] || msgs.search, false);
+    else if (scanCam.auto && scanCam.doubts >= 2) scanCamSetStatus('Cadrage incertain — appuyez sur le déclencheur', false);
     else if (scanCam.auto) scanCamSetStatus('Ne bougez plus…', true);
     else scanCamSetStatus('Document détecté — prêt', true);
 }
@@ -3744,7 +3757,10 @@ function scanCamApplyMode() {
 }
 
 // Prise de vue : image pleine résolution du flux, cadrage final recalculé
-// dessus. Auto -> directement le scan redressé ; manuel -> vérification des coins.
+// dessus. Auto -> directement le scan redressé ; manuel -> vérification des
+// coins. En auto, garde-fou « sans erreur » : l'image figée est ré-analysée à
+// une autre résolution (420 px) ; si le contour ne concorde pas avec celui
+// suivi en direct (300 px), pas de capture — le cadrage est ambigu.
 async function scanCamCapture(auto) {
     if (scanCam.capturing || !scanCam.open) return;
     const v = scanCamVideo;
@@ -3759,6 +3775,25 @@ async function scanCamCapture(auto) {
     const tracked = scanCam.target && performance.now() - scanCam.lastSeen < 500
         ? scanCam.target.map(p => ({ x: p.x, y: p.y })) : null;
 
+    let fresh;
+    if (auto) {
+        const session = scanCam.session;
+        fresh = await scanCamAnalyzeSource(src, src.width, src.height, 420);
+        const agree = fresh && tracked && !fresh.relaxed && !fresh.partial &&
+            fresh.confidence >= SCAN_AUTO_CONF &&
+            scanQuadDist(fresh.quad, tracked, src.width, src.height) < 0.02;
+        if (!agree || !scanCam.open || session !== scanCam.session) {
+            scanCam.capturing = false;
+            if (!scanCam.open || session !== scanCam.session) return;
+            scanCam.doubts++;
+            scanCam.anchor = null;
+            scanCam.stableSince = performance.now();
+            scanCamUpdateStatus();
+            scanCam.loopTimer = setTimeout(scanCamDetectTick, 0);
+            return;
+        }
+    }
+
     scanCamSetStatus('Capture…', true);
     if (scanCamFlashEl) {
         scanCamFlashEl.classList.remove('go');
@@ -3772,7 +3807,7 @@ async function scanCamCapture(auto) {
     await new Promise(r => setTimeout(r, 30));
     try {
         scanState.source = src;
-        const quad = scanResolveQuad(src, tracked);
+        const quad = scanResolveQuad(src, tracked, fresh);
         scanState.quad = quad || defaultQuad();
         drawScanPreview();
         if (auto && quad) await scanWarpToResult();
@@ -3788,10 +3823,11 @@ async function scanCamCapture(auto) {
 }
 
 // Cadrage final : détection sur la photo capturée (plus fine que l'analyse
-// du flux), recoupée avec le cadre suivi en direct — en cas de désaccord, le
-// cadre suivi (stable dans le temps) l'emporte — puis raffinement au pixel
-function scanResolveQuad(src, tracked) {
-    const r = detectDocumentQuadEx(src, 420);
+// du flux, ou déjà faite par la vérification), recoupée avec le cadre suivi en
+// direct — en cas de désaccord, le cadre suivi (stable dans le temps)
+// l'emporte — puis raffinement au pixel
+function scanResolveQuad(src, tracked, detected) {
+    const r = detected !== undefined ? detected : detectDocumentQuadEx(src, 420);
     const fresh = r && !r.relaxed ? r.quad : null;
     let quad;
     if (tracked && fresh) {
@@ -4061,6 +4097,7 @@ function detectDocumentQuadEx(srcCanvas, maxSide) {
         const cv = document.createElement('canvas');
         cv.width = w; cv.height = h;
         const cctx = cv.getContext('2d');
+        cctx.imageSmoothingQuality = 'high';   // réduction filtrée : bords nets, sans crénelage
         cctx.drawImage(srcCanvas, 0, 0, w, h);
         return detectQuadInRGBA(cctx.getImageData(0, 0, w, h).data, w, h);
     } catch (err) {
@@ -4084,6 +4121,7 @@ function refineDocumentQuad(srcCanvas, quad) {
         const cv = document.createElement('canvas');
         cv.width = w; cv.height = h;
         const cctx = cv.getContext('2d');
+        cctx.imageSmoothingQuality = 'high';   // réduction filtrée : bords nets, sans crénelage
         cctx.drawImage(srcCanvas, 0, 0, w, h);
         return refineQuadInRGBA(cctx.getImageData(0, 0, w, h).data, w, h, quad);
     } catch (err) {
