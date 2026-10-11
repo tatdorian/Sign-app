@@ -41,15 +41,29 @@ Un éditeur type Word, par calque, aplati dans le PDF à l'enregistrement :
 Transformez une photo de document en scan « qualité imprimante », 100 % dans
 le navigateur (aucune image n'est envoyée sur un serveur) :
 
-- **Capture** : appareil photo (mobile) ou image existante
-- **Détection automatique des coins** (trois stratégies combinées) :
-  contours de Canny multi-seuils, segmentation d'Otsu (gris + canal
-  « papier » clair et peu saturé), et transformée de Hough (bords en tant
-  que droites dominantes — reconstruit les coins masqués par un doigt) ;
-  sélection par score composite (aire, adhérence aux gradients robuste à
-  l'occlusion, contraste intérieur/extérieur) puis **raffinement
-  sub-pixel** des coins (aimantation des bords sur les crêtes de gradient,
-  moindres carrés, intersections) — repli sur un cadre ajustable si besoin
+- **Caméra en direct avec capture automatique** (comme le scanner
+  d'Apple) : un cadre bleu suit le document en temps réel ; dès que le
+  cadrage est fiable et que l'appareil ne bouge plus (~1 s, anneau de
+  progression sur le déclencheur), la photo se prend toute seule et le scan
+  redressé s'affiche. Mode *Manuel* (déclencheur → vérification des coins),
+  lampe torche si disponible, consignes à l'écran (« Rapprochez-vous »,
+  « Reculez : le document doit être entier »…). Analyse du flux dans un
+  Web Worker (interface fluide) ; repli sur l'appareil photo natif si la
+  caméra en direct est refusée ou indisponible
+- **Import** : image existante (galerie, glisser-déposer)
+- **Détection automatique des coins** (`scan-detect.js`, trois générateurs
+  de candidats) : droites de Hough *orientées* (chaque pixel vote selon sa
+  propre direction de gradient) combinées en quadrilatères, contours de
+  Canny multi-seuils, segmentation d'Otsu (gris + canal « papier » clair et
+  peu saturé). Sélection par **preuve de bord** : le long de chaque côté, un
+  vrai bord de feuille est présent, orienté comme le côté, et l'intérieur
+  (papier) y est plus clair que l'extérieur — écarte lignes de texte, cadres
+  de tableaux imprimés, limites d'ombre et bord de l'image. Les documents
+  coupés sont reconnus (bords qui se prolongent au-delà d'un coin) : jamais
+  de capture automatique sur un cadrage incomplet
+- **Raffinement au pixel** : aimantation des bords sur les crêtes de gradient
+  de bonne polarité, moindres carrés robustes, puis second passage sur la
+  photo en ~1200 px — repli sur un cadre ajustable si besoin
 - **Ajustement manuel** : 4 poignées draggables avec loupe de précision
 - **Redressement** : homographie (transformation projective) calculée à partir
   des 4 coins, interpolation bilinéaire, ratio A4 auto-détecté
