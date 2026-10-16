@@ -3361,6 +3361,9 @@ function defaultQuad() {
 const scanTakeBtn = document.getElementById('scan-take-btn');
 const scanGalleryBtn = document.getElementById('scan-gallery-btn');
 if (scanTakeBtn) scanTakeBtn.addEventListener('click', () => scanOpenCamera());
+// Appareil photo du téléphone : ses propres réglages (flash, zoom…)
+const scanNativeBtn = document.getElementById('scan-native-btn');
+if (scanNativeBtn && scanInput) scanNativeBtn.addEventListener('click', () => scanInput.click());
 if (scanGalleryBtn && scanInputGal) scanGalleryBtn.addEventListener('click', () => scanInputGal.click());
 if (scanInput) scanInput.addEventListener('change', () => { scanLoadFile(scanInput.files[0]); scanInput.value = ''; });
 if (scanInputGal) scanInputGal.addEventListener('change', () => { scanLoadFile(scanInputGal.files[0]); scanInputGal.value = ''; });
@@ -3401,6 +3404,7 @@ const scanCamPages    = document.getElementById('scan-cam-pages');
 const scanCamMsg      = document.getElementById('scan-cam-msg');
 const SCAN_RING_LEN   = 226.2;   // circonférence de l'anneau du déclencheur
 const scanCamDiag     = document.getElementById('scan-cam-diag');
+const scanCamNative   = document.getElementById('scan-cam-native');
 // Version affichée (lue dans le pied de page, seule source) : visible en haut
 // du Scanner et dans la caméra, pour vérifier d'un coup d'œil la mise à jour
 const APP_VERSION = ((document.querySelector('.app-version') || {}).textContent || '').trim();
@@ -3408,7 +3412,11 @@ const scanVersionEl = document.getElementById('scan-version');
 if (scanVersionEl) scanVersionEl.textContent = APP_VERSION;
 
 const scanCam = {
-    open: false, stream: null, track: null, torchOn: false,
+    open: false, stream: null, track: null,
+    torchOn: false,         // flash (lampe) allumé
+    torchWanted: false,     // préférence mémorisée : flash à l'ouverture
+    torchSupported: null,   // null = inconnu, true/false une fois testé
+    notice: null,           // message ponctuel { text, until } prioritaire
     auto: true,
     unavailable: false,     // getUserMedia refusé/absent -> appareil photo natif
     worker: null, workerFailed: false, reqId: 0,
@@ -3425,7 +3433,10 @@ const scanCam = {
     session: 0              // incrémenté à chaque ouverture (flux périmés)
 };
 
-try { scanCam.auto = localStorage.getItem('scanCamMode') !== 'manual'; } catch (e) { /* stockage indisponible */ }
+try {
+    scanCam.auto = localStorage.getItem('scanCamMode') !== 'manual';
+    scanCam.torchWanted = localStorage.getItem('scanCamTorch') === 'on';
+} catch (e) { /* stockage indisponible */ }
 
 // Distance max entre coins homologues, en fraction de la diagonale
 function scanQuadDist(a, b, vw, vh) {
@@ -3512,14 +3523,11 @@ async function scanCamStartStream() {
     scanCam.stream = stream;
     scanCam.track = stream.getVideoTracks()[0] || null;
     scanCam.torchOn = false;
+    scanCamTorchUI();
     let caps = {};
     try { caps = (scanCam.track && scanCam.track.getCapabilities) ? scanCam.track.getCapabilities() : {}; } catch (e) { caps = {}; }
     if (caps.focusMode && caps.focusMode.indexOf('continuous') >= 0) {
         scanCam.track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {});
-    }
-    if (scanCamTorch) {
-        scanCamTorch.style.visibility = caps.torch ? 'visible' : 'hidden';
-        scanCamTorch.classList.remove('on');
     }
     scanCamVideo.muted = true;
     scanCamVideo.srcObject = stream;
@@ -3533,6 +3541,7 @@ async function scanCamStartStream() {
     try { await scanCamVideo.play(); } catch (e) { /* autoplay muet : déjà lancé */ }
     scanCamLayout();
     scanCamStartLoops();
+    scanCamSetupTorch(session);   // sans attendre : la vidéo est déjà visible
 }
 
 function scanCamStopStream() {
@@ -3564,6 +3573,8 @@ function scanCamResetTracking() {
     scanCam.hint = 'search';
     scanCam.doubts = 0;
     scanCam.nAnalyses = 0; scanCam.diagAt = 0; scanCam.lastConf = null;
+    scanCam.notice = null;
+    if (scanCamNative) scanCamNative.style.display = 'none';
     if (scanCamDiag) scanCamDiag.textContent = APP_VERSION;
     if (scanCamOverlay) scanCamOverlay.classList.remove('has-quad', 'locked');
     if (scanCamProgress) scanCamProgress.style.strokeDashoffset = SCAN_RING_LEN;
@@ -3586,6 +3597,67 @@ function scanCamStartLoops() {
     scanCam.lastTs = 0;
     scanCam.raf = requestAnimationFrame(scanCamRender);
     scanCam.loopTimer = setTimeout(scanCamDetectTick, 150);
+}
+
+// ---------- Flash (lampe torche de la caméra) ----------
+function scanCamTorchUI() {
+    if (!scanCamTorch) return;
+    scanCamTorch.classList.toggle('on', scanCam.torchOn);
+    scanCamTorch.classList.toggle('unsupported', scanCam.torchSupported === false);
+    scanCamTorch.setAttribute('aria-pressed', scanCam.torchOn ? 'true' : 'false');
+    scanCamTorch.title = scanCam.torchSupported === false ? 'Flash non disponible en direct'
+        : scanCam.torchOn ? 'Éteindre le flash' : 'Allumer le flash';
+}
+
+// Allume/éteint le flash ; vrai si l'appareil l'a effectivement appliqué.
+// (Contrainte « advanced » = au mieux : sans erreur même si non supportée,
+// d'où la relecture de getSettings().)
+async function scanCamApplyTorch(on) {
+    const track = scanCam.track;
+    if (!track) return false;
+    try {
+        await track.applyConstraints({ advanced: [{ torch: on }] });
+    } catch (e) {
+        return false;
+    }
+    let applied = on;
+    try {
+        const st = track.getSettings ? track.getSettings() : {};
+        if ('torch' in st) applied = !!st.torch;
+        else if (on && scanCam.torchSupported !== true) applied = false;
+    } catch (e) { /* ignoré */ }
+    if (track !== scanCam.track) return false;
+    scanCam.torchOn = applied && on;
+    if (applied && on) scanCam.torchSupported = true;
+    scanCamTorchUI();
+    return applied === on;
+}
+
+// Chrome Android n'annonce souvent le flash qu'une fois la vidéo lancée, et
+// certains appareils ne le pilotent qu'après création d'un ImageCapture :
+// on teste donc plusieurs fois, puis on rallume le flash si demandé.
+async function scanCamSetupTorch(session) {
+    const track = scanCam.track;
+    if (!track) return;
+    try {
+        if (typeof ImageCapture !== 'undefined') {
+            await new ImageCapture(track).getPhotoCapabilities().catch(() => {});
+        }
+    } catch (e) { /* ImageCapture indisponible */ }
+    let supported = false;
+    for (const wait of [0, 400, 1200]) {
+        if (wait) await new Promise(r => setTimeout(r, wait));
+        if (!scanCam.open || session !== scanCam.session || track !== scanCam.track) return;
+        try {
+            const caps = track.getCapabilities ? track.getCapabilities() : {};
+            if (caps.torch) { supported = true; break; }
+        } catch (e) { /* ignoré */ }
+    }
+    if (supported) scanCam.torchSupported = true;
+    else if (scanCam.torchSupported === null) scanCam.torchSupported = false;
+    scanCamTorchUI();
+    // Préférence mémorisée : flash rallumé à chaque ouverture de la caméra
+    if (scanCam.torchWanted) await scanCamApplyTorch(true);
 }
 
 // Analyse d'une image RGBA réduite : dans le Worker si possible (interface
@@ -3739,6 +3811,10 @@ function scanCamSetStatus(text, ok) {
 
 function scanCamUpdateStatus() {
     if (scanCam.capturing) return;
+    if (scanCam.notice) {
+        if (performance.now() < scanCam.notice.until) { scanCamSetStatus(scanCam.notice.text, false); return; }
+        scanCam.notice = null;
+    }
     const msgs = {
         search: 'Recherche du document…',
         far: 'Reculez : le document doit être entier',
@@ -3893,12 +3969,26 @@ if (scanCamEl) {
     });
     if (scanCamTorch) {
         scanCamTorch.addEventListener('click', async () => {
-            if (!scanCam.track) return;
-            try {
-                await scanCam.track.applyConstraints({ advanced: [{ torch: !scanCam.torchOn }] });
-                scanCam.torchOn = !scanCam.torchOn;
-                scanCamTorch.classList.toggle('on', scanCam.torchOn);
-            } catch (e) { /* lampe non pilotable */ }
+            const want = !scanCam.torchOn;
+            scanCam.torchWanted = want;
+            try { localStorage.setItem('scanCamTorch', want ? 'on' : 'off'); } catch (e) { /* ignoré */ }
+            if (!scanCam.track) { scanCamTorchUI(); return; }
+            const ok = await scanCamApplyTorch(want);
+            if (want && !ok) {
+                // Le navigateur ne pilote pas le flash de cet appareil : proposer
+                // l'appareil photo du téléphone, qui a son propre flash
+                scanCam.torchSupported = false;
+                scanCam.notice = { text: 'Flash non disponible en direct sur cet appareil', until: performance.now() + 4000 };
+                if (scanCamNative) scanCamNative.style.display = 'inline-flex';
+                scanCamUpdateStatus();
+            }
+            scanCamTorchUI();
+        });
+    }
+    if (scanCamNative) {
+        scanCamNative.addEventListener('click', () => {
+            scanCloseCamera();
+            if (scanInput) scanInput.click();
         });
     }
     scanCamVideo.addEventListener('resize', scanCamLayout);

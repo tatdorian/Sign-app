@@ -335,6 +335,7 @@
                                     Scanner avec la caméra
                                 </button>
                                 <button class="btn btn-secondary" id="scan-gallery-btn">Choisir une image</button>
+                                <button class="btn btn-ghost" id="scan-native-btn">Appareil photo du téléphone</button>
                             </div>
                             <p class="scan-cam-msg" id="scan-cam-msg" style="display:none"></p>
                             <p class="file-info">Posez le document sur un fond contrasté, bien à plat</p>
@@ -554,7 +555,7 @@
         </main>
 
         <footer>
-            <p>&copy; 2026 Application de signature <span class="app-version">v1.0.5</span></p>
+            <p>&copy; 2026 Application de signature <span class="app-version">v1.0.6</span></p>
         </footer>
     </div>
 
@@ -568,7 +569,7 @@
                 <button class="scan-cam-mode-btn active" type="button" data-cam-mode="auto">Auto</button>
                 <button class="scan-cam-mode-btn" type="button" data-cam-mode="manual">Manuel</button>
             </div>
-            <button class="scan-cam-btn" id="scan-cam-torch" type="button" aria-label="Lampe torche" style="visibility:hidden">
+            <button class="scan-cam-btn scan-cam-flash-btn" id="scan-cam-torch" type="button" aria-label="Flash" aria-pressed="false" title="Flash">
                 <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg>
             </button>
         </div>
@@ -582,6 +583,10 @@
             </div>
             <div class="scan-cam-status" id="scan-cam-status" aria-live="polite">Ouverture de la caméra…</div>
             <div class="scan-cam-diag" id="scan-cam-diag" aria-hidden="true"></div>
+            <button class="scan-cam-native" id="scan-cam-native" type="button" style="display:none">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                Appareil photo du téléphone (avec flash)
+            </button>
         </div>
         <div class="scan-cam-bar scan-cam-bottom">
             <button class="scan-cam-btn scan-cam-side" id="scan-cam-gallery" type="button" aria-label="Choisir une image">

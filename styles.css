@@ -489,6 +489,21 @@ body.scan-cam-open { overflow: hidden; }
 }
 .scan-cam-btn:active { transform: scale(.94); }
 .scan-cam-btn.on { background: #FFD60A; color: #000; }
+/* Flash non pilotable par le navigateur : bouton atténué (reste cliquable) */
+.scan-cam-flash-btn.unsupported { opacity: .45; }
+.scan-cam-native {
+    position: absolute; left: 50%; bottom: 30px;
+    transform: translateX(-50%);
+    display: inline-flex; align-items: center; gap: 7px;
+    max-width: calc(100% - 24px);
+    padding: 9px 15px;
+    border: 0; border-radius: 999px;
+    background: rgba(255,255,255,.92); color: #000;
+    font-family: inherit; font-size: 13px; font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0,0,0,.35);
+}
 .scan-cam-mode {
     display: flex;
     background: rgba(255,255,255,.14);
