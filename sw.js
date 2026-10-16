@@ -2,7 +2,7 @@
 // SERVICE WORKER - Signature App PWA
 // Strategie cache-first avec mise a jour reseau
 // =============================================
-const VERSION = 'sig-app-v10';
+const VERSION = 'sig-app-v11';
 const CACHE_STATIC = `${VERSION}-static`;
 const CACHE_RUNTIME = `${VERSION}-runtime`;
 

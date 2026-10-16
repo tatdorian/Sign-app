@@ -46,11 +46,14 @@ le navigateur (aucune image n'est envoyée sur un serveur) :
   cadrage est fiable et que l'appareil ne bouge plus (~1 s, anneau de
   progression sur le déclencheur), la photo se prend toute seule et le scan
   redressé s'affiche. Mode *Manuel* (déclencheur → vérification des coins),
-  lampe torche si disponible, consignes à l'écran (« Rapprochez-vous »,
+  bouton flash (choix mémorisé, rallumé à chaque ouverture ; si le
+  navigateur ne pilote pas le flash, accès direct à l'appareil photo du
+  téléphone et à son propre flash), consignes à l'écran (« Rapprochez-vous »,
   « Reculez : le document doit être entier »…). Analyse du flux dans un
   Web Worker (interface fluide) ; repli sur l'appareil photo natif si la
   caméra en direct est refusée ou indisponible
-- **Import** : image existante (galerie, glisser-déposer)
+- **Import** : image existante (galerie, glisser-déposer) ou photo prise avec
+  l'appareil photo du téléphone (ses propres réglages : flash, zoom…)
 - **Détection automatique des coins** (`scan-detect.js`, trois générateurs
   de candidats) : droites de Hough *orientées* (chaque pixel vote selon sa
   propre direction de gradient) combinées en quadrilatères, contours de
